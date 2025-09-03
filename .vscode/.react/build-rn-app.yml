@@ -1,0 +1,335 @@
+# .github/workflows/build-rn-app.yml
+name: Build React Native App
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Build ID'
+        required: true
+        type: string
+      app_name:
+        description: 'App Name'
+        required: true
+        type: string
+      build_type:
+        description: 'Build Type'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+        - release
+        - debug
+      output_type:
+        description: 'Output Type'
+        required: false
+        default: 'apk'
+        type: choice
+        options:
+        - apk
+        - aab
+      platform:
+        description: 'Platform'
+        required: false
+        default: 'android'
+        type: string
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js 18
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Setup Java 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Read build configuration
+      id: config
+      run: |
+        if [ -f "build-config.json" ]; then
+          echo "Build config found, reading parameters..."
+          
+          # Extract values from build-config.json
+          WEBSITE_ADDRESS=$(jq -r '.website_address' build-config.json)
+          APP_NAME=$(jq -r '.app_name' build-config.json)
+          VERSION_CODE=$(jq -r '.version_code' build-config.json)
+          VERSION_NAME=$(jq -r '.version_name' build-config.json)
+          NAME_SPACE=$(jq -r '.name_space' build-config.json)
+          BUILD_TYPE=$(jq -r '.buildType' build-config.json)
+          OUTPUT_TYPE=$(jq -r '.outputType' build-config.json)
+          APP_ICON=$(jq -r '.app_icon' build-config.json)
+          
+          # Set environment variables
+          echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
+          echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "NAME_SPACE=$NAME_SPACE" >> $GITHUB_ENV
+          echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_ENV
+          echo "OUTPUT_TYPE=$OUTPUT_TYPE" >> $GITHUB_ENV
+          echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
+          
+          echo "Configuration loaded successfully"
+        else
+          echo "No build config found, using workflow inputs"
+          echo "APP_NAME=${{ github.event.inputs.app_name }}" >> $GITHUB_ENV
+          echo "BUILD_TYPE=${{ github.event.inputs.build_type }}" >> $GITHUB_ENV
+          echo "OUTPUT_TYPE=${{ github.event.inputs.output_type }}" >> $GITHUB_ENV
+        fi
+        
+    - name: Install dependencies
+      run: |
+        echo "Installing npm dependencies..."
+        npm install --no-audit --no-fund
+        
+    - name: Apply template customizations
+      run: |
+        echo "Applying template customizations..."
+        
+        # Default values if not set
+        WEBSITE_ADDRESS=${WEBSITE_ADDRESS:-"https://example.com"}
+        APP_NAME=${APP_NAME:-"MyApp"}
+        VERSION_CODE=${VERSION_CODE:-"1"}
+        VERSION_NAME=${VERSION_NAME:-"1.0.0"}
+        NAME_SPACE=${NAME_SPACE:-"com.myapp.example"}
+        
+        echo "App Name: $APP_NAME"
+        echo "Namespace: $NAME_SPACE"
+        echo "Version: $VERSION_NAME ($VERSION_CODE)"
+        
+        # Extract middle segment for folder structure
+        MIDDLE_SEGMENT=$(echo $NAME_SPACE | cut -d'.' -f2)
+        if [ -z "$MIDDLE_SEGMENT" ]; then
+          MIDDLE_SEGMENT=$(echo $NAME_SPACE | rev | cut -d'.' -f1 | rev)
+        fi
+        
+        echo "Middle segment: $MIDDLE_SEGMENT"
+        
+        # Apply text replacements (similar to your original logic)
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/rn_project_template/$MIDDLE_SEGMENT/g" {} \;
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{website_address}}/$WEBSITE_ADDRESS/g" {} \;
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{app_name}}/$APP_NAME/g" {} \;
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{version_code}}/$VERSION_CODE/g" {} \;
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{version_name}}/$VERSION_NAME/g" {} \;
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/com\.rn_project_template/$NAME_SPACE/g" {} \;
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{name_space}}/$NAME_SPACE/g" {} \;
+        
+        # Restructure Java package directories
+        echo "Restructuring Java packages..."
+        OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
+        NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
+        
+        if [ -d "$OLD_JAVA_PATH" ]; then
+          mkdir -p "$(dirname "$NEW_JAVA_PATH")"
+          mv "$OLD_JAVA_PATH" "$NEW_JAVA_PATH"
+          echo "Moved Java files from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
+          
+          # Clean up empty directories
+          find android/app/src/main/java/com -type d -empty -delete 2>/dev/null || true
+        fi
+        
+    - name: Process custom app icon
+      if: env.APP_ICON != '' && env.APP_ICON != 'null'
+      run: |
+        echo "Processing custom app icon..."
+        
+        # Install sharp for image processing
+        npm install sharp
+        
+        # Create Node.js script to process icon
+        cat > process_icon.js << 'EOF'
+        const sharp = require('sharp');
+        const fs = require('fs');
+        const path = require('path');
+        
+        async function generateIcons() {
+          const iconData = process.env.APP_ICON;
+          let iconBuffer;
+          
+          if (iconData.startsWith('data:image/')) {
+            const base64Data = iconData.replace(/^data:image\/\w+;base64,/, '');
+            iconBuffer = Buffer.from(base64Data, 'base64');
+          } else {
+            console.log('Icon should be base64 data URL');
+            return;
+          }
+          
+          const androidResPath = 'android/app/src/main/res';
+          
+          // Generate different icon sizes
+          const iconSizes = [
+            { size: 36, folder: 'drawable-ldpi' },
+            { size: 48, folder: 'drawable-mdpi' },  
+            { size: 72, folder: 'drawable-hdpi' },
+            { size: 96, folder: 'drawable-xhdpi' },
+            { size: 144, folder: 'drawable-xxhdpi' },
+            { size: 192, folder: 'drawable-xxxhdpi' }
+          ];
+          
+          for (const {size, folder} of iconSizes) {
+            const folderPath = path.join(androidResPath, folder);
+            if (!fs.existsSync(folderPath)) {
+              fs.mkdirSync(folderPath, {recursive: true});
+            }
+            
+            await sharp(iconBuffer)
+              .resize(size, size)
+              .png()
+              .toFile(path.join(folderPath, 'ic_launcher.png'));
+          }
+          
+          // Generate mipmap icons  
+          const mipmapSizes = [
+            { size: 48, folder: 'mipmap-mdpi' },
+            { size: 72, folder: 'mipmap-hdpi' },
+            { size: 96, folder: 'mipmap-xhdpi' },
+            { size: 144, folder: 'mipmap-xxhdpi' },
+            { size: 192, folder: 'mipmap-xxxhdpi' }
+          ];
+          
+          for (const {size, folder} of mipmapSizes) {
+            const folderPath = path.join(androidResPath, folder);
+            if (!fs.existsSync(folderPath)) {
+              fs.mkdirSync(folderPath, {recursive: true});
+            }
+            
+            await sharp(iconBuffer)
+              .resize(size, size) 
+              .png()
+              .toFile(path.join(folderPath, 'ic_launcher.png'));
+              
+            await sharp(iconBuffer)
+              .resize(size, size)
+              .png() 
+              .toFile(path.join(folderPath, 'ic_launcher_round.png'));
+          }
+          
+          console.log('Custom icons generated successfully');
+        }
+        
+        generateIcons().catch(console.error);
+        EOF
+        
+        node process_icon.js
+        
+    - name: Make gradlew executable
+      run: chmod +x android/gradlew
+      
+    - name: Clean previous builds
+      run: |
+        cd android
+        ./gradlew clean --no-daemon
+        
+    - name: Build Android App
+      run: |
+        cd android
+        
+        BUILD_TYPE=${BUILD_TYPE:-release}
+        OUTPUT_TYPE=${OUTPUT_TYPE:-apk}
+        
+        echo "Building $BUILD_TYPE $OUTPUT_TYPE..."
+        
+        # Set Gradle arguments based on build type and output type
+        if [ "$BUILD_TYPE" = "release" ]; then
+          if [ "$OUTPUT_TYPE" = "aab" ]; then
+            GRADLE_TASK="bundleRelease"
+            BUILT_PATH="app/build/outputs/bundle/release/app-release.aab"
+          else
+            GRADLE_TASK="assembleRelease"
+            BUILT_PATH="app/build/outputs/apk/release/app-release.apk"
+          fi
+        else
+          GRADLE_TASK="assembleDebug"
+          BUILT_PATH="app/build/outputs/apk/debug/app-debug.apk"
+        fi
+        
+        echo "Running: ./gradlew $GRADLE_TASK"
+        
+        # Set environment variables for Gradle
+        export GRADLE_OPTS="-Xmx4g -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g"
+        
+        # Run the build
+        ./gradlew $GRADLE_TASK \
+          --stacktrace \
+          --no-daemon \
+          --no-build-cache \
+          -Dorg.gradle.jvmargs="-Xmx4g -XX:+HeapDumpOnOutOfMemoryError"
+          
+        echo "Build completed successfully!"
+        echo "BUILT_PATH=$BUILT_PATH" >> $GITHUB_ENV
+        
+    - name: Prepare build artifacts
+      run: |
+        BUILD_ID="${{ github.event.inputs.build_id }}"
+        APP_NAME="${APP_NAME:-${{ github.event.inputs.app_name }}}"
+        BUILD_TYPE="${BUILD_TYPE:-${{ github.event.inputs.build_type }}}"
+        OUTPUT_TYPE="${OUTPUT_TYPE:-${{ github.event.inputs.output_type }}}"
+        
+        # Create artifacts directory
+        mkdir -p artifacts
+        
+        # Copy built app
+        BUILT_FILE="android/${BUILT_PATH}"
+        ARTIFACT_NAME="app-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
+        
+        if [ -f "$BUILT_FILE" ]; then
+          cp "$BUILT_FILE" "artifacts/$ARTIFACT_NAME"
+          echo "Copied $BUILT_FILE to artifacts/$ARTIFACT_NAME"
+        else
+          echo "Error: Built file not found at $BUILT_FILE"
+          ls -la android/app/build/outputs/
+          exit 1
+        fi
+        
+        # Create build info
+        cat > artifacts/build-info.json << EOF
+        {
+          "buildId": "$BUILD_ID",
+          "appName": "$APP_NAME", 
+          "buildType": "$BUILD_TYPE",
+          "outputType": "$OUTPUT_TYPE",
+          "platform": "android",
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "versionCode": "${VERSION_CODE:-1}",
+          "versionName": "${VERSION_NAME:-1.0.0}",
+          "namespace": "${NAME_SPACE:-com.example.app}"
+        }
+        EOF
+        
+        echo "Build artifacts prepared successfully"
+        ls -la artifacts/
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ github.event.inputs.app_name }}-${{ github.event.inputs.build_type }}-${{ github.event.inputs.build_id }}
+        path: artifacts/
+        retention-days: 30
+        
+    - name: Notify build completion
+      if: always()
+      run: |
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "✅ Build completed successfully!"
+          echo "App: ${{ github.event.inputs.app_name }}"
+          echo "Build ID: ${{ github.event.inputs.build_id }}"
+          echo "Type: ${{ github.event.inputs.build_type }} ${{ github.event.inputs.output_type }}"
+        else
+          echo "❌ Build failed!"
+          echo "Check the logs above for error details."
+        fi
