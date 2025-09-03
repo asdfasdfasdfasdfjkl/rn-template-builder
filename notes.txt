@@ -1,0 +1,5 @@
+app.tsx -> {{website_address}} change count -> 1
+app.json -> {{app_name}} change count -> 2
+android/app/build.gradle -> {{version_code}}, {{version_name}}, {{name_space}} change count - > first two 1 replace and namespace twice
+android/app/src/main/java/com/rn_project_template/MainActivity.kt -> {{name_space}} change count -> 1
+android/app/src/main/java/com/rn_project_template/MainApplication.kt -> {{name_space}} change count -> 1
