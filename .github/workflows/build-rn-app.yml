@@ -37,13 +37,13 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Setup Node.js 18
+    - name: Setup Node.js 18 with cache
       uses: actions/setup-node@v4
       with:
         node-version: '18'
@@ -55,14 +55,34 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         
-    - name: Setup Android SDK
+    - name: Setup Android SDK with cache
       uses: android-actions/setup-android@v3
-      
+      with:
+        cache-key: android-sdk-${{ runner.os }}
+        
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Cache node_modules
+      uses: actions/cache@v4
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node_modules-
+
     - name: Read build configuration
       id: config
       run: |
         if [ -f "build-config.json" ]; then
-          echo "Build config found, reading parameters..."
+          echo "status=Reading build configuration..." >> $GITHUB_OUTPUT
           
           # Extract values from build-config.json
           WEBSITE_ADDRESS=$(jq -r '.website_address' build-config.json)
@@ -73,6 +93,7 @@ jobs:
           BUILD_TYPE=$(jq -r '.buildType' build-config.json)
           OUTPUT_TYPE=$(jq -r '.outputType' build-config.json)
           APP_ICON=$(jq -r '.app_icon' build-config.json)
+          BUILD_ID=$(jq -r '.buildId' build-config.json)
           
           # Set environment variables
           echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
@@ -83,23 +104,26 @@ jobs:
           echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_ENV
           echo "OUTPUT_TYPE=$OUTPUT_TYPE" >> $GITHUB_ENV
           echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
           
           echo "Configuration loaded successfully"
         else
-          echo "No build config found, using workflow inputs"
+          echo "status=No build config found, using workflow inputs" >> $GITHUB_OUTPUT
           echo "APP_NAME=${{ github.event.inputs.app_name }}" >> $GITHUB_ENV
           echo "BUILD_TYPE=${{ github.event.inputs.build_type }}" >> $GITHUB_ENV
           echo "OUTPUT_TYPE=${{ github.event.inputs.output_type }}" >> $GITHUB_ENV
+          echo "BUILD_ID=${{ github.event.inputs.build_id }}" >> $GITHUB_ENV
         fi
         
     - name: Install dependencies
       run: |
-        echo "Installing npm dependencies..."
-        npm install --no-audit --no-fund
+        echo "status=Installing npm dependencies..." >> $GITHUB_OUTPUT
+        # Use ci for faster, reliable installs
+        npm ci --no-audit --no-fund --prefer-offline
         
     - name: Apply template customizations
       run: |
-        echo "Applying template customizations..."
+        echo "status=Applying template customizations..." >> $GITHUB_OUTPUT
         
         # Default values if not set
         WEBSITE_ADDRESS=${WEBSITE_ADDRESS:-"https://example.com"}
@@ -120,14 +144,10 @@ jobs:
         
         echo "Middle segment: $MIDDLE_SEGMENT"
         
-        # Apply text replacements (similar to your original logic)
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/rn_project_template/$MIDDLE_SEGMENT/g" {} \;
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{website_address}}/$WEBSITE_ADDRESS/g" {} \;
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{app_name}}/$APP_NAME/g" {} \;
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{version_code}}/$VERSION_CODE/g" {} \;
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{version_name}}/$VERSION_NAME/g" {} \;
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/com\.rn_project_template/$NAME_SPACE/g" {} \;
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i "s/{{name_space}}/$NAME_SPACE/g" {} \;
+        # Apply text replacements (parallel processing for speed)
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -print0 | xargs -0 -P 4 -I {} sh -c '
+          sed -i "s/rn_project_template/'$MIDDLE_SEGMENT'/g; s/{{website_address}}/'$WEBSITE_ADDRESS'/g; s/{{app_name}}/'$APP_NAME'/g; s/{{version_code}}/'$VERSION_CODE'/g; s/{{version_name}}/'$VERSION_NAME'/g; s/com\.rn_project_template/'$NAME_SPACE'/g; s/{{name_space}}/'$NAME_SPACE'/g" "{}"
+        '
         
         # Restructure Java package directories
         echo "Restructuring Java packages..."
@@ -146,12 +166,12 @@ jobs:
     - name: Process custom app icon
       if: env.APP_ICON != '' && env.APP_ICON != 'null'
       run: |
-        echo "Processing custom app icon..."
+        echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
         
         # Install sharp for image processing
-        npm install sharp
+        npm install sharp --no-save
         
-        # Create Node.js script to process icon
+        # Create optimized Node.js script to process icon
         cat > process_icon.js << 'EOF'
         const sharp = require('sharp');
         const fs = require('fs');
@@ -171,7 +191,7 @@ jobs:
           
           const androidResPath = 'android/app/src/main/res';
           
-          // Generate different icon sizes
+          // Generate different icon sizes in parallel
           const iconSizes = [
             { size: 36, folder: 'drawable-ldpi' },
             { size: 48, folder: 'drawable-mdpi' },  
@@ -181,19 +201,6 @@ jobs:
             { size: 192, folder: 'drawable-xxxhdpi' }
           ];
           
-          for (const {size, folder} of iconSizes) {
-            const folderPath = path.join(androidResPath, folder);
-            if (!fs.existsSync(folderPath)) {
-              fs.mkdirSync(folderPath, {recursive: true});
-            }
-            
-            await sharp(iconBuffer)
-              .resize(size, size)
-              .png()
-              .toFile(path.join(folderPath, 'ic_launcher.png'));
-          }
-          
-          // Generate mipmap icons  
           const mipmapSizes = [
             { size: 48, folder: 'mipmap-mdpi' },
             { size: 72, folder: 'mipmap-hdpi' },
@@ -202,23 +209,45 @@ jobs:
             { size: 192, folder: 'mipmap-xxxhdpi' }
           ];
           
+          // Process all sizes in parallel for speed
+          const allTasks = [];
+          
+          for (const {size, folder} of iconSizes) {
+            const folderPath = path.join(androidResPath, folder);
+            if (!fs.existsSync(folderPath)) {
+              fs.mkdirSync(folderPath, {recursive: true});
+            }
+            
+            allTasks.push(
+              sharp(iconBuffer)
+                .resize(size, size)
+                .png()
+                .toFile(path.join(folderPath, 'ic_launcher.png'))
+            );
+          }
+          
           for (const {size, folder} of mipmapSizes) {
             const folderPath = path.join(androidResPath, folder);
             if (!fs.existsSync(folderPath)) {
               fs.mkdirSync(folderPath, {recursive: true});
             }
             
-            await sharp(iconBuffer)
-              .resize(size, size) 
-              .png()
-              .toFile(path.join(folderPath, 'ic_launcher.png'));
-              
-            await sharp(iconBuffer)
-              .resize(size, size)
-              .png() 
-              .toFile(path.join(folderPath, 'ic_launcher_round.png'));
+            allTasks.push(
+              sharp(iconBuffer)
+                .resize(size, size)
+                .png()
+                .toFile(path.join(folderPath, 'ic_launcher.png'))
+            );
+            
+            allTasks.push(
+              sharp(iconBuffer)
+                .resize(size, size)
+                .png() 
+                .toFile(path.join(folderPath, 'ic_launcher_round.png'))
+            );
           }
           
+          await Promise.all(allTasks);
           console.log('Custom icons generated successfully');
         }
         
@@ -232,11 +261,13 @@ jobs:
       
     - name: Clean previous builds
       run: |
+        echo "status=Cleaning previous builds..." >> $GITHUB_OUTPUT
         cd android
-        ./gradlew clean --no-daemon
+        ./gradlew clean --no-daemon --parallel
         
     - name: Build Android App
       run: |
+        echo "status=Building Android application..." >> $GITHUB_OUTPUT
         cd android
         
         BUILD_TYPE=${BUILD_TYPE:-release}
@@ -260,22 +291,25 @@ jobs:
         
         echo "Running: ./gradlew $GRADLE_TASK"
         
-        # Set environment variables for Gradle
-        export GRADLE_OPTS="-Xmx4g -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g"
+        # Optimized Gradle settings for faster builds
+        export GRADLE_OPTS="-Xmx6g -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx6g -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true"
         
-        # Run the build
+        # Run the build with optimizations
         ./gradlew $GRADLE_TASK \
           --stacktrace \
           --no-daemon \
-          --no-build-cache \
-          -Dorg.gradle.jvmargs="-Xmx4g -XX:+HeapDumpOnOutOfMemoryError"
+          --parallel \
+          --build-cache \
+          --configure-on-demand \
+          -Dorg.gradle.jvmargs="-Xmx6g -XX:+UseG1GC -XX:+UseStringDeduplication"
           
         echo "Build completed successfully!"
         echo "BUILT_PATH=$BUILT_PATH" >> $GITHUB_ENV
         
     - name: Prepare build artifacts
       run: |
-        BUILD_ID="${{ github.event.inputs.build_id }}"
+        echo "status=Preparing build artifacts..." >> $GITHUB_OUTPUT
+        BUILD_ID="${BUILD_ID:-${{ github.event.inputs.build_id }}}"
         APP_NAME="${APP_NAME:-${{ github.event.inputs.app_name }}}"
         BUILD_TYPE="${BUILD_TYPE:-${{ github.event.inputs.build_type }}}"
         OUTPUT_TYPE="${OUTPUT_TYPE:-${{ github.event.inputs.output_type }}}"
@@ -307,28 +341,99 @@ jobs:
           "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
           "versionCode": "${VERSION_CODE:-1}",
           "versionName": "${VERSION_NAME:-1.0.0}",
-          "namespace": "${NAME_SPACE:-com.example.app}"
+          "namespace": "${NAME_SPACE:-com.example.app}",
+          "fileSize": "$(stat -c%s "artifacts/$ARTIFACT_NAME")",
+          "fileName": "$ARTIFACT_NAME"
         }
         EOF
         
         echo "Build artifacts prepared successfully"
         ls -la artifacts/
+        echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
         
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
       with:
-        name: ${{ github.event.inputs.app_name }}-${{ github.event.inputs.build_type }}-${{ github.event.inputs.build_id }}
-        path: artifacts/
-        retention-days: 30
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
         
-    - name: Notify build completion
+    - name: Upload to AWS S3
+      run: |
+        echo "status=Uploading artifacts to AWS S3..." >> $GITHUB_OUTPUT
+        
+        BUILD_ID="${BUILD_ID:-${{ github.event.inputs.build_id }}}"
+        S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
+        S3_PREFIX="builds/${BUILD_ID}"
+        
+        if [ -z "$S3_BUCKET" ]; then
+          echo "Error: AWS_S3_BUCKET secret not configured"
+          exit 1
+        fi
+        
+        # Upload all artifacts to S3
+        aws s3 cp artifacts/ s3://${S3_BUCKET}/${S3_PREFIX}/ --recursive
+        
+        # Generate presigned URLs (valid for 7 days)
+        APP_DOWNLOAD_URL=$(aws s3 presign s3://${S3_BUCKET}/${S3_PREFIX}/${ARTIFACT_NAME} --expires-in 604800)
+        INFO_DOWNLOAD_URL=$(aws s3 presign s3://${S3_BUCKET}/${S3_PREFIX}/build-info.json --expires-in 604800)
+        
+        echo "APP_DOWNLOAD_URL=$APP_DOWNLOAD_URL" >> $GITHUB_ENV
+        echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
+        
+        echo "✅ Successfully uploaded to S3: s3://${S3_BUCKET}/${S3_PREFIX}/"
+        
+    - name: Update build status
       if: always()
       run: |
+        BUILD_ID="${BUILD_ID:-${{ github.event.inputs.build_id }}}"
+        S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
+        
+        if [ "${{ job.status }}" = "success" ]; then
+          STATUS="completed"
+          CONCLUSION="success"
+          MESSAGE="Build completed successfully and uploaded to S3"
+        else
+          STATUS="completed"  
+          CONCLUSION="failure"
+          MESSAGE="Build failed - check logs for details"
+        fi
+        
+        # Create status file
+        cat > build-status.json << EOF
+        {
+          "buildId": "$BUILD_ID",
+          "status": "$STATUS",
+          "conclusion": "$CONCLUSION", 
+          "message": "$MESSAGE",
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "downloadUrl": "${APP_DOWNLOAD_URL:-null}",
+          "infoUrl": "${INFO_DOWNLOAD_URL:-null}",
+          "repoUrl": "${{ github.server_url }}/${{ github.repository }}"
+        }
+        EOF
+        
+        # Upload status to S3
+        if [ -n "$S3_BUCKET" ]; then
+          aws s3 cp build-status.json s3://${S3_BUCKET}/status/${BUILD_ID}.json
+          echo "Status uploaded to S3"
+        fi
+        
+    - name: Cleanup and delete repository
+      if: always()
+      run: |
+        echo "status=Cleaning up and deleting repository..." >> $GITHUB_OUTPUT
+        
+        # The repository will be deleted by the calling API after this workflow completes
+        # This step is just for logging
+        echo "Repository cleanup will be handled by the API caller"
+        
         if [ "${{ job.status }}" = "success" ]; then
           echo "✅ Build completed successfully!"
           echo "App: ${{ github.event.inputs.app_name }}"
           echo "Build ID: ${{ github.event.inputs.build_id }}"
           echo "Type: ${{ github.event.inputs.build_type }} ${{ github.event.inputs.output_type }}"
+          echo "Files uploaded to S3 successfully"
         else
           echo "❌ Build failed!"
           echo "Check the logs above for error details."
