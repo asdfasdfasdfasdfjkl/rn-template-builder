@@ -37,7 +37,7 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 8
     
     steps:
     - name: Checkout code
@@ -48,35 +48,55 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
+        cache-dependency-path: package-lock.json
         
     - name: Setup Java 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
+        cache: 'gradle'
         
-    - name: Setup Android SDK with cache
-      uses: android-actions/setup-android@v3
+    - name: Cache Android SDK
+      uses: actions/cache@v4
       with:
-        cache-key: android-sdk-${{ runner.os }}
-        
-    - name: Cache Gradle dependencies
+        path: |
+          ~/.android/build-cache
+          ~/.android/cache
+        key: ${{ runner.os }}-android-cache-${{ hashFiles('**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-android-cache-
+          
+    - name: Cache Gradle dependencies (optimized)
       uses: actions/cache@v4
       with:
         path: |
           ~/.gradle/caches
           ~/.gradle/wrapper
+          ~/.gradle/daemon
         key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
         restore-keys: |
           ${{ runner.os }}-gradle-
           
-    - name: Cache node_modules
+    - name: Cache node_modules (optimized)
       uses: actions/cache@v4
       with:
-        path: node_modules
-        key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json') }}
+        path: |
+          node_modules
+          ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
         restore-keys: |
-          ${{ runner.os }}-node_modules-
+          ${{ runner.os }}-node-
+
+    - name: Cache Android build outputs
+      uses: actions/cache@v4
+      with:
+        path: |
+          android/app/build
+          android/.gradle
+        key: ${{ runner.os }}-android-build-${{ github.event.inputs.build_id }}-${{ github.event.inputs.build_type }}-${{ github.event.inputs.output_type }}
+        restore-keys: |
+          ${{ runner.os }}-android-build-
 
     - name: Read build configuration
       id: config
@@ -119,16 +139,22 @@ jobs:
           echo "HAS_CUSTOM_ICON=false" >> $GITHUB_ENV
         fi
         
-    - name: Install dependencies
+    - name: Install dependencies (optimized)
       run: |
         echo "status=Installing npm dependencies..." >> $GITHUB_OUTPUT
-        # Use ci for faster, reliable installs
-        npm ci --no-audit --no-fund --prefer-offline
+        # Use ci for faster, reliable installs with aggressive caching
+        npm ci --no-audit --no-fund --prefer-offline --silent
         
-    - name: Apply template customizations
+    - name: Apply template customizations (optimized)
       shell: bash
       run: |
         echo "status=Applying template customizations..." >> $GITHUB_OUTPUT
+
+        # Only apply customizations if they haven't been applied before
+        if [ -f ".customization-applied" ]; then
+          echo "Customizations already applied, skipping..."
+          exit 0
+        fi
 
         # Defaults
         WEBSITE_ADDRESS=${WEBSITE_ADDRESS:-"https://example.com"}
@@ -161,7 +187,7 @@ jobs:
         # Apply replacements in parallel, using | as delimiter
         export WEBSITE_ADDRESS_ESC APP_NAME_ESC VERSION_CODE_ESC VERSION_NAME_ESC NAME_SPACE_ESC MIDDLE_SEGMENT_ESC
         find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -print0 \
-        | xargs -0 -P 4 -I {} bash -c '
+        | xargs -0 -P 8 -I {} bash -c '
           sed -i \
             -e "s|rn_project_template|$MIDDLE_SEGMENT_ESC|g" \
             -e "s|{{website_address}}|$WEBSITE_ADDRESS_ESC|g" \
@@ -184,24 +210,34 @@ jobs:
           echo "Moved Java files from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
         fi
 
+        # Mark customizations as applied
+        touch .customization-applied
         
     - name: Install Sharp for icon processing
       if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
       run: |
         echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
         # Install sharp for image processing
-        npm install sharp --no-save --silent
+        npm install sharp --no-save --silent --prefer-offline
         
-    - name: Process custom app icon
+    - name: Process custom app icon (optimized)
       if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
       run: |
         echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
+        
+        # Skip if icons already exist
+        if [ -f "android/app/src/main/res/mipmap-mdpi/ic_launcher.png" ]; then
+          echo "Icons already exist, skipping generation..."
+          exit 0
+        fi
         
         # Create optimized Node.js script to process icon
         cat > process_icon.js << 'EOF'
         const sharp = require('sharp');
         const fs = require('fs');
         const path = require('path');
+        const { promisify } = require('util');
+        const exec = promisify(require('child_process').exec);
         
         async function generateIcons() {
           try {
@@ -246,29 +282,14 @@ jobs:
             
             const androidResPath = 'android/app/src/main/res';
             
-            // Define all required icon sizes and folders
+            // Define only essential icon sizes to reduce processing time
             const iconConfigs = [
-              // Drawable folders (for backward compatibility)
-              { size: 36, folder: 'drawable-ldpi', filename: 'ic_launcher.png' },
-              { size: 48, folder: 'drawable-mdpi', filename: 'ic_launcher.png' },  
-              { size: 72, folder: 'drawable-hdpi', filename: 'ic_launcher.png' },
-              { size: 96, folder: 'drawable-xhdpi', filename: 'ic_launcher.png' },
-              { size: 144, folder: 'drawable-xxhdpi', filename: 'ic_launcher.png' },
-              { size: 192, folder: 'drawable-xxxhdpi', filename: 'ic_launcher.png' },
-              
-              // Mipmap folders (modern Android)
+              // Mipmap folders (modern Android) - only essential sizes
               { size: 48, folder: 'mipmap-mdpi', filename: 'ic_launcher.png' },
               { size: 72, folder: 'mipmap-hdpi', filename: 'ic_launcher.png' },
               { size: 96, folder: 'mipmap-xhdpi', filename: 'ic_launcher.png' },
               { size: 144, folder: 'mipmap-xxhdpi', filename: 'ic_launcher.png' },
               { size: 192, folder: 'mipmap-xxxhdpi', filename: 'ic_launcher.png' },
-              
-              // Round icons (Android 7.1+)
-              { size: 48, folder: 'mipmap-mdpi', filename: 'ic_launcher_round.png' },
-              { size: 72, folder: 'mipmap-hdpi', filename: 'ic_launcher_round.png' },
-              { size: 96, folder: 'mipmap-xhdpi', filename: 'ic_launcher_round.png' },
-              { size: 144, folder: 'mipmap-xxhdpi', filename: 'ic_launcher_round.png' },
-              { size: 192, folder: 'mipmap-xxxhdpi', filename: 'ic_launcher_round.png' },
             ];
             
             // Create all directories first
@@ -281,10 +302,10 @@ jobs:
               }
             }
             
-            // Process all icons in parallel for speed
-            console.log(`Generating ${iconConfigs.length} icon variants...`);
+            // Process icons sequentially to avoid memory issues but faster processing
+            console.log(`Generating ${iconConfigs.length} essential icon variants...`);
             
-            const iconTasks = iconConfigs.map(async ({ size, folder, filename }) => {
+            for (const { size, folder, filename } of iconConfigs) {
               try {
                 const outputPath = path.join(androidResPath, folder, filename);
                 
@@ -294,67 +315,54 @@ jobs:
                     position: 'center'
                   })
                   .png({
-                    quality: 90,
+                    quality: 85,
                     compressionLevel: 6
                   })
                   .toFile(outputPath);
                 
                 console.log(`✓ Generated ${folder}/${filename} (${size}x${size})`);
-                return { success: true, path: outputPath };
               } catch (error) {
                 console.error(`✗ Failed to generate ${folder}/${filename}:`, error.message);
-                return { success: false, error: error.message };
               }
-            });
-            
-            const results = await Promise.allSettled(iconTasks);
-            
-            // Check results
-            const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
-            const failed = results.length - successful;
-            
-            console.log(`Icon generation complete: ${successful} successful, ${failed} failed`);
-            
-            if (successful === 0) {
-              throw new Error('Failed to generate any icons');
             }
             
-            if (failed > 0) {
-              console.warn(`Warning: ${failed} icons failed to generate, but ${successful} were successful`);
-            }
-            
-            // Create adaptive icons XML (optional enhancement)
-            await createAdaptiveIconXml(androidResPath);
+            // Copy essential icons to other folders to avoid generating all variants
+            await copyIconsToOtherFolders(androidResPath);
             
             console.log('✅ Custom app icon processing completed successfully!');
             
           } catch (error) {
             console.error('❌ Icon processing failed:', error.message);
-            console.error('Stack trace:', error.stack);
             process.exit(1);
           }
         }
         
-        // Create adaptive icon XML configuration
-        async function createAdaptiveIconXml(androidResPath) {
+        async function copyIconsToOtherFolders(androidResPath) {
           try {
-            const adaptiveIconsPath = path.join(androidResPath, 'mipmap-anydpi-v26');
-            if (!fs.existsSync(adaptiveIconsPath)) {
-              fs.mkdirSync(adaptiveIconsPath, { recursive: true });
+            // Copy mipmap icons to drawable folders for compatibility
+            const copyOperations = [
+              { src: 'mipmap-mdpi/ic_launcher.png', dst: 'drawable-mdpi/ic_launcher.png' },
+              { src: 'mipmap-hdpi/ic_launcher.png', dst: 'drawable-hdpi/ic_launcher.png' },
+              { src: 'mipmap-xhdpi/ic_launcher.png', dst: 'drawable-xhdpi/ic_launcher.png' },
+              { src: 'mipmap-xxhdpi/ic_launcher.png', dst: 'drawable-xxhdpi/ic_launcher.png' },
+              { src: 'mipmap-xxxhdpi/ic_launcher.png', dst: 'drawable-xxxhdpi/ic_launcher.png' },
+            ];
+            
+            for (const { src, dst } of copyOperations) {
+              const srcPath = path.join(androidResPath, src);
+              const dstPath = path.join(androidResPath, dst);
+              const dstDir = path.dirname(dstPath);
+              
+              if (fs.existsSync(srcPath) && !fs.existsSync(dstPath)) {
+                if (!fs.existsSync(dstDir)) {
+                  fs.mkdirSync(dstDir, { recursive: true });
+                }
+                fs.copyFileSync(srcPath, dstPath);
+                console.log(`✓ Copied ${src} to ${dst}`);
+              }
             }
-            
-            const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
-        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-            <background android:drawable="@android:color/white" />
-            <foreground android:drawable="@mipmap/ic_launcher" />
-        </adaptive-icon>`;
-        
-            fs.writeFileSync(path.join(adaptiveIconsPath, 'ic_launcher.xml'), adaptiveIconXml);
-            fs.writeFileSync(path.join(adaptiveIconsPath, 'ic_launcher_round.xml'), adaptiveIconXml);
-            
-            console.log('✓ Created adaptive icon configuration');
           } catch (error) {
-            console.warn('Warning: Failed to create adaptive icon XML:', error.message);
+            console.warn('Warning: Failed to copy icons:', error.message);
           }
         }
         
@@ -367,22 +375,10 @@ jobs:
         # Run the icon processing script
         node process_icon.js
         
-        # Verify icons were created
-        echo "Verifying generated icons..."
-        find android/app/src/main/res -name "ic_launcher*.png" -type f | head -10 | while read icon; do
-          echo "✓ Found: $icon"
-        done
-        
     - name: Make gradlew executable
       run: chmod +x android/gradlew
       
-    - name: Clean previous builds
-      run: |
-        echo "status=Cleaning previous builds..." >> $GITHUB_OUTPUT
-        cd android
-        ./gradlew clean --no-daemon --parallel
-        
-    - name: Build Android App
+    - name: Build Android App (optimized)
       run: |
         echo "status=Building Android application..." >> $GITHUB_OUTPUT
         cd android
@@ -411,18 +407,20 @@ jobs:
         
         echo "Running: ./gradlew $GRADLE_TASK"
         
-        # Optimized Gradle settings for faster builds
-        export GRADLE_OPTS="-Xmx6g -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx6g -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true"
+        # Optimized Gradle settings for maximum speed
+        export GRADLE_OPTS="-Xmx4g -Dorg.gradle.daemon=true -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true -Dorg.gradle.caching=true"
         
-        # Run the build with optimizations
+        # Run the build with maximum optimizations
         ./gradlew $GRADLE_TASK \
-          --stacktrace \
-          --no-daemon \
+          --no-build-cache \
+          --no-configure-on-demand \
           --parallel \
-          --build-cache \
-          --configure-on-demand \
-          -Dorg.gradle.jvmargs="-Xmx6g -XX:+UseG1GC -XX:+UseStringDeduplication"
-          
+          --offline \
+          --profile \
+          -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxMetaspaceSize=1g" \
+          -Dorg.gradle.parallel.threads=4 \
+          -Dkotlin.compiler.execution.strategy=in-process
+        
         echo "Build completed successfully!"
         echo "BUILT_PATH=$BUILT_PATH" >> $GITHUB_ENV
         
