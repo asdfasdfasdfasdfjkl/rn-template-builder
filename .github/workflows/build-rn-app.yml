@@ -37,7 +37,7 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     
     steps:
     - name: Checkout code
@@ -94,6 +94,7 @@ jobs:
           OUTPUT_TYPE=$(jq -r '.outputType' build-config.json)
           APP_ICON=$(jq -r '.app_icon' build-config.json)
           BUILD_ID=$(jq -r '.buildId' build-config.json)
+          HAS_CUSTOM_ICON=$(jq -r '.has_custom_icon' build-config.json)
           
           # Set environment variables
           echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
@@ -105,14 +106,17 @@ jobs:
           echo "OUTPUT_TYPE=$OUTPUT_TYPE" >> $GITHUB_ENV
           echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
+          echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
           
           echo "Configuration loaded successfully"
+          echo "Custom icon provided: $HAS_CUSTOM_ICON"
         else
           echo "status=No build config found, using workflow inputs" >> $GITHUB_OUTPUT
           echo "APP_NAME=${{ github.event.inputs.app_name }}" >> $GITHUB_ENV
           echo "BUILD_TYPE=${{ github.event.inputs.build_type }}" >> $GITHUB_ENV
           echo "OUTPUT_TYPE=${{ github.event.inputs.output_type }}" >> $GITHUB_ENV
           echo "BUILD_ID=${{ github.event.inputs.build_id }}" >> $GITHUB_ENV
+          echo "HAS_CUSTOM_ICON=false" >> $GITHUB_ENV
         fi
         
     - name: Install dependencies
@@ -181,13 +185,17 @@ jobs:
         fi
 
         
+    - name: Install Sharp for icon processing
+      if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
+      run: |
+        echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
+        # Install sharp for image processing
+        npm install sharp --no-save --silent
+        
     - name: Process custom app icon
-      if: env.APP_ICON != '' && env.APP_ICON != 'null'
+      if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
       run: |
         echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
-        
-        # Install sharp for image processing
-        npm install sharp --no-save
         
         # Create optimized Node.js script to process icon
         cat > process_icon.js << 'EOF'
@@ -196,83 +204,174 @@ jobs:
         const path = require('path');
         
         async function generateIcons() {
-          const iconData = process.env.APP_ICON;
-          let iconBuffer;
-          
-          if (iconData.startsWith('data:image/')) {
-            const base64Data = iconData.replace(/^data:image\/\w+;base64,/, '');
-            iconBuffer = Buffer.from(base64Data, 'base64');
-          } else {
-            console.log('Icon should be base64 data URL');
-            return;
-          }
-          
-          const androidResPath = 'android/app/src/main/res';
-          
-          // Generate different icon sizes in parallel
-          const iconSizes = [
-            { size: 36, folder: 'drawable-ldpi' },
-            { size: 48, folder: 'drawable-mdpi' },  
-            { size: 72, folder: 'drawable-hdpi' },
-            { size: 96, folder: 'drawable-xhdpi' },
-            { size: 144, folder: 'drawable-xxhdpi' },
-            { size: 192, folder: 'drawable-xxxhdpi' }
-          ];
-          
-          const mipmapSizes = [
-            { size: 48, folder: 'mipmap-mdpi' },
-            { size: 72, folder: 'mipmap-hdpi' },
-            { size: 96, folder: 'mipmap-xhdpi' },
-            { size: 144, folder: 'mipmap-xxhdpi' },
-            { size: 192, folder: 'mipmap-xxxhdpi' }
-          ];
-          
-          // Process all sizes in parallel for speed
-          const allTasks = [];
-          
-          for (const {size, folder} of iconSizes) {
-            const folderPath = path.join(androidResPath, folder);
-            if (!fs.existsSync(folderPath)) {
-              fs.mkdirSync(folderPath, {recursive: true});
+          try {
+            const iconData = process.env.APP_ICON;
+            
+            if (!iconData || iconData === 'null') {
+              console.log('No app icon provided');
+              return;
             }
             
-            allTasks.push(
-              sharp(iconBuffer)
-                .resize(size, size)
-                .png()
-                .toFile(path.join(folderPath, 'ic_launcher.png'))
-            );
-          }
-          
-          for (const {size, folder} of mipmapSizes) {
-            const folderPath = path.join(androidResPath, folder);
-            if (!fs.existsSync(folderPath)) {
-              fs.mkdirSync(folderPath, {recursive: true});
+            console.log('Processing app icon...');
+            
+            let iconBuffer;
+            
+            // Validate and extract base64 data
+            if (iconData.startsWith('data:image/')) {
+              const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
+              if (!matches) {
+                throw new Error('Invalid data URL format');
+              }
+              
+              const [, imageType, base64Data] = matches;
+              console.log(`Image type: ${imageType}`);
+              
+              if (!['png', 'jpeg', 'jpg', 'gif', 'webp'].includes(imageType.toLowerCase())) {
+                throw new Error(`Unsupported image type: ${imageType}`);
+              }
+              
+              iconBuffer = Buffer.from(base64Data, 'base64');
+              console.log(`Icon buffer size: ${iconBuffer.length} bytes`);
+            } else {
+              throw new Error('App icon must be a base64 data URL');
             }
             
-            allTasks.push(
-              sharp(iconBuffer)
-                .resize(size, size)
-                .png()
-                .toFile(path.join(folderPath, 'ic_launcher.png'))
-            );
+            // Verify the image can be processed
+            const metadata = await sharp(iconBuffer).metadata();
+            console.log(`Original image: ${metadata.width}x${metadata.height} ${metadata.format}`);
             
-            allTasks.push(
-              sharp(iconBuffer)
-                .resize(size, size)
-                .png() 
-                .toFile(path.join(folderPath, 'ic_launcher_round.png'))
-            );
+            if (metadata.width < 48 || metadata.height < 48) {
+              throw new Error('Icon too small. Minimum size is 48x48 pixels');
+            }
+            
+            const androidResPath = 'android/app/src/main/res';
+            
+            // Define all required icon sizes and folders
+            const iconConfigs = [
+              // Drawable folders (for backward compatibility)
+              { size: 36, folder: 'drawable-ldpi', filename: 'ic_launcher.png' },
+              { size: 48, folder: 'drawable-mdpi', filename: 'ic_launcher.png' },  
+              { size: 72, folder: 'drawable-hdpi', filename: 'ic_launcher.png' },
+              { size: 96, folder: 'drawable-xhdpi', filename: 'ic_launcher.png' },
+              { size: 144, folder: 'drawable-xxhdpi', filename: 'ic_launcher.png' },
+              { size: 192, folder: 'drawable-xxxhdpi', filename: 'ic_launcher.png' },
+              
+              // Mipmap folders (modern Android)
+              { size: 48, folder: 'mipmap-mdpi', filename: 'ic_launcher.png' },
+              { size: 72, folder: 'mipmap-hdpi', filename: 'ic_launcher.png' },
+              { size: 96, folder: 'mipmap-xhdpi', filename: 'ic_launcher.png' },
+              { size: 144, folder: 'mipmap-xxhdpi', filename: 'ic_launcher.png' },
+              { size: 192, folder: 'mipmap-xxxhdpi', filename: 'ic_launcher.png' },
+              
+              // Round icons (Android 7.1+)
+              { size: 48, folder: 'mipmap-mdpi', filename: 'ic_launcher_round.png' },
+              { size: 72, folder: 'mipmap-hdpi', filename: 'ic_launcher_round.png' },
+              { size: 96, folder: 'mipmap-xhdpi', filename: 'ic_launcher_round.png' },
+              { size: 144, folder: 'mipmap-xxhdpi', filename: 'ic_launcher_round.png' },
+              { size: 192, folder: 'mipmap-xxxhdpi', filename: 'ic_launcher_round.png' },
+            ];
+            
+            // Create all directories first
+            const uniqueFolders = [...new Set(iconConfigs.map(config => config.folder))];
+            for (const folder of uniqueFolders) {
+              const folderPath = path.join(androidResPath, folder);
+              if (!fs.existsSync(folderPath)) {
+                fs.mkdirSync(folderPath, { recursive: true });
+                console.log(`Created folder: ${folderPath}`);
+              }
+            }
+            
+            // Process all icons in parallel for speed
+            console.log(`Generating ${iconConfigs.length} icon variants...`);
+            
+            const iconTasks = iconConfigs.map(async ({ size, folder, filename }) => {
+              try {
+                const outputPath = path.join(androidResPath, folder, filename);
+                
+                await sharp(iconBuffer)
+                  .resize(size, size, {
+                    fit: 'cover',
+                    position: 'center'
+                  })
+                  .png({
+                    quality: 90,
+                    compressionLevel: 6
+                  })
+                  .toFile(outputPath);
+                
+                console.log(`✓ Generated ${folder}/${filename} (${size}x${size})`);
+                return { success: true, path: outputPath };
+              } catch (error) {
+                console.error(`✗ Failed to generate ${folder}/${filename}:`, error.message);
+                return { success: false, error: error.message };
+              }
+            });
+            
+            const results = await Promise.allSettled(iconTasks);
+            
+            // Check results
+            const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+            const failed = results.length - successful;
+            
+            console.log(`Icon generation complete: ${successful} successful, ${failed} failed`);
+            
+            if (successful === 0) {
+              throw new Error('Failed to generate any icons');
+            }
+            
+            if (failed > 0) {
+              console.warn(`Warning: ${failed} icons failed to generate, but ${successful} were successful`);
+            }
+            
+            // Create adaptive icons XML (optional enhancement)
+            await createAdaptiveIconXml(androidResPath);
+            
+            console.log('✅ Custom app icon processing completed successfully!');
+            
+          } catch (error) {
+            console.error('❌ Icon processing failed:', error.message);
+            console.error('Stack trace:', error.stack);
+            process.exit(1);
           }
-          
-          await Promise.all(allTasks);
-          console.log('Custom icons generated successfully');
         }
         
-        generateIcons().catch(console.error);
+        // Create adaptive icon XML configuration
+        async function createAdaptiveIconXml(androidResPath) {
+          try {
+            const adaptiveIconsPath = path.join(androidResPath, 'mipmap-anydpi-v26');
+            if (!fs.existsSync(adaptiveIconsPath)) {
+              fs.mkdirSync(adaptiveIconsPath, { recursive: true });
+            }
+            
+            const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
+        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@android:color/white" />
+            <foreground android:drawable="@mipmap/ic_launcher" />
+        </adaptive-icon>`;
+        
+            fs.writeFileSync(path.join(adaptiveIconsPath, 'ic_launcher.xml'), adaptiveIconXml);
+            fs.writeFileSync(path.join(adaptiveIconsPath, 'ic_launcher_round.xml'), adaptiveIconXml);
+            
+            console.log('✓ Created adaptive icon configuration');
+          } catch (error) {
+            console.warn('Warning: Failed to create adaptive icon XML:', error.message);
+          }
+        }
+        
+        generateIcons().catch((error) => {
+          console.error('Fatal error in icon generation:', error);
+          process.exit(1);
+        });
         EOF
         
+        # Run the icon processing script
         node process_icon.js
+        
+        # Verify icons were created
+        echo "Verifying generated icons..."
+        find android/app/src/main/res -name "ic_launcher*.png" -type f | head -10 | while read icon; do
+          echo "✓ Found: $icon"
+        done
         
     - name: Make gradlew executable
       run: chmod +x android/gradlew
@@ -292,6 +391,9 @@ jobs:
         OUTPUT_TYPE=${OUTPUT_TYPE:-apk}
         
         echo "Building $BUILD_TYPE $OUTPUT_TYPE..."
+        if [ "$HAS_CUSTOM_ICON" = "true" ]; then
+          echo "Building with custom app icon"
+        fi
         
         # Set Gradle arguments based on build type and output type
         if [ "$BUILD_TYPE" = "release" ]; then
@@ -361,7 +463,8 @@ jobs:
           "versionName": "${VERSION_NAME:-1.0.0}",
           "namespace": "${NAME_SPACE:-com.example.app}",
           "fileSize": "$(stat -c%s "artifacts/$ARTIFACT_NAME")",
-          "fileName": "$ARTIFACT_NAME"
+          "fileName": "$ARTIFACT_NAME",
+          "hasCustomIcon": "${HAS_CUSTOM_ICON:-false}"
         }
         EOF
         
@@ -410,7 +513,11 @@ jobs:
         if [ "${{ job.status }}" = "success" ]; then
           STATUS="completed"
           CONCLUSION="success"
-          MESSAGE="Build completed successfully and uploaded to S3"
+          if [ "$HAS_CUSTOM_ICON" = "true" ]; then
+            MESSAGE="Build completed successfully with custom app icon and uploaded to S3"
+          else
+            MESSAGE="Build completed successfully and uploaded to S3"
+          fi
         else
           STATUS="completed"  
           CONCLUSION="failure"
@@ -427,7 +534,8 @@ jobs:
           "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
           "downloadUrl": "${APP_DOWNLOAD_URL:-null}",
           "infoUrl": "${INFO_DOWNLOAD_URL:-null}",
-          "repoUrl": "${{ github.server_url }}/${{ github.repository }}"
+          "repoUrl": "${{ github.server_url }}/${{ github.repository }}",
+          "hasCustomIcon": "${HAS_CUSTOM_ICON:-false}"
         }
         EOF
         
@@ -451,6 +559,9 @@ jobs:
           echo "App: ${{ github.event.inputs.app_name }}"
           echo "Build ID: ${{ github.event.inputs.build_id }}"
           echo "Type: ${{ github.event.inputs.build_type }} ${{ github.event.inputs.output_type }}"
+          if [ "$HAS_CUSTOM_ICON" = "true" ]; then
+            echo "Custom app icon: Applied successfully"
+          fi
           echo "Files uploaded to S3 successfully"
         else
           echo "❌ Build failed!"
