@@ -122,46 +122,64 @@ jobs:
         npm ci --no-audit --no-fund --prefer-offline
         
     - name: Apply template customizations
+      shell: bash
       run: |
         echo "status=Applying template customizations..." >> $GITHUB_OUTPUT
-        
-        # Default values if not set
+
+        # Defaults
         WEBSITE_ADDRESS=${WEBSITE_ADDRESS:-"https://example.com"}
         APP_NAME=${APP_NAME:-"MyApp"}
         VERSION_CODE=${VERSION_CODE:-"1"}
         VERSION_NAME=${VERSION_NAME:-"1.0.0"}
         NAME_SPACE=${NAME_SPACE:-"com.myapp.example"}
-        
+
         echo "App Name: $APP_NAME"
         echo "Namespace: $NAME_SPACE"
         echo "Version: $VERSION_NAME ($VERSION_CODE)"
-        
-        # Extract middle segment for folder structure
-        MIDDLE_SEGMENT=$(echo $NAME_SPACE | cut -d'.' -f2)
+
+        # Middle segment for template folder names
+        MIDDLE_SEGMENT=$(echo "$NAME_SPACE" | cut -d'.' -f2)
         if [ -z "$MIDDLE_SEGMENT" ]; then
-          MIDDLE_SEGMENT=$(echo $NAME_SPACE | rev | cut -d'.' -f1 | rev)
+          MIDDLE_SEGMENT=$(echo "$NAME_SPACE" | awk -F. '{print $NF}')
         fi
-        
         echo "Middle segment: $MIDDLE_SEGMENT"
-        
-        # Apply text replacements (parallel processing for speed)
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -print0 | xargs -0 -P 4 -I {} sh -c '
-          sed -i "s/rn_project_template/'$MIDDLE_SEGMENT'/g; s/{{website_address}}/'$WEBSITE_ADDRESS'/g; s/{{app_name}}/'$APP_NAME'/g; s/{{version_code}}/'$VERSION_CODE'/g; s/{{version_name}}/'$VERSION_NAME'/g; s/com\.rn_project_template/'$NAME_SPACE'/g; s/{{name_space}}/'$NAME_SPACE'/g" "{}"
+
+        # Escape replacements for sed: escape \, /, &
+        esc() { printf '%s' "$1" | sed -e 's/[\\/&]/\\&/g'; }
+
+        WEBSITE_ADDRESS_ESC=$(esc "$WEBSITE_ADDRESS")
+        APP_NAME_ESC=$(esc "$APP_NAME")
+        VERSION_CODE_ESC=$(esc "$VERSION_CODE")
+        VERSION_NAME_ESC=$(esc "$VERSION_NAME")
+        NAME_SPACE_ESC=$(esc "$NAME_SPACE")
+        MIDDLE_SEGMENT_ESC=$(esc "$MIDDLE_SEGMENT")
+
+        # Apply replacements in parallel, using | as delimiter
+        export WEBSITE_ADDRESS_ESC APP_NAME_ESC VERSION_CODE_ESC VERSION_NAME_ESC NAME_SPACE_ESC MIDDLE_SEGMENT_ESC
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -print0 \
+        | xargs -0 -P 4 -I {} bash -c '
+          sed -i \
+            -e "s|rn_project_template|$MIDDLE_SEGMENT_ESC|g" \
+            -e "s|{{website_address}}|$WEBSITE_ADDRESS_ESC|g" \
+            -e "s|{{app_name}}|$APP_NAME_ESC|g" \
+            -e "s|{{version_code}}|$VERSION_CODE_ESC|g" \
+            -e "s|{{version_name}}|$VERSION_NAME_ESC|g" \
+            -e "s|com\.rn_project_template|$NAME_SPACE_ESC|g" \
+            -e "s|{{name_space}}|$NAME_SPACE_ESC|g" \
+            "{}"
         '
-        
-        # Restructure Java package directories
+
+        # Restructure Java/Kotlin package directories
         echo "Restructuring Java packages..."
         OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
-        NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
-        
+        NEW_JAVA_PATH="android/app/src/main/java/$(echo "$NAME_SPACE" | tr "." "/")"
         if [ -d "$OLD_JAVA_PATH" ]; then
           mkdir -p "$(dirname "$NEW_JAVA_PATH")"
           mv "$OLD_JAVA_PATH" "$NEW_JAVA_PATH"
-          echo "Moved Java files from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
-          
-          # Clean up empty directories
           find android/app/src/main/java/com -type d -empty -delete 2>/dev/null || true
+          echo "Moved Java files from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
         fi
+
         
     - name: Process custom app icon
       if: env.APP_ICON != '' && env.APP_ICON != 'null'
