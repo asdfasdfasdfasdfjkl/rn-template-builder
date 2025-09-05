@@ -110,23 +110,25 @@ jobs:
           
           # Function to safely replace placeholders
           safe_replace() {
-            local file=$1
-            local placeholder=$2
-            local value=$3
-            
-            if [ -f "$file" ]; then
+          local file=$1
+          local placeholder=$2
+          local value=$3
+          
+          if [ -f "$file" ]; then
               # No escaping of special characters, just replace as-is
+              # Use a placeholder that ensures no special regex characters are treated
               sed -i "s|$placeholder|$value|g" "$file"
               echo "✓ Replaced $placeholder in $file"
               
               # Verify replacement
               if grep -q "$placeholder" "$file"; then
-                echo "⚠ Warning: $placeholder still found in $file after replacement"
+                  echo "⚠ Warning: $placeholder still found in $file after replacement"
               fi
-            else
+          else
               echo "✗ File not found: $file"
-            fi
-          }
+          fi
+      }
+
           
           # Replace placeholders in App.tsx
           safe_replace "App.tsx" "{{website_address}}" "${{ env.WEBSITE_ADDRESS }}"
