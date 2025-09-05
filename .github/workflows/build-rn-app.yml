@@ -117,7 +117,7 @@ jobs:
           fi
 
           # Ensure we escape special characters properly when replacing
-          esc() { printf '%s' "$1" | sed 's/[\.*^$()+?{|]/\\&/g'; }
+          esc() { printf '%s' "$1" | sed 's/[]\/$*.^[]/\\&/g'; }
 
           # Ensure the paths for replacement are valid and the files exist before applying changes
           if [ -f "package.json" ]; then
@@ -137,9 +137,9 @@ jobs:
             fi
           done
 
-          # Repeat for other necessary files and paths...
           echo "Template customizations applied successfully"
           touch .customization-applied
+
 
 
       - name: Validate Android project structure
