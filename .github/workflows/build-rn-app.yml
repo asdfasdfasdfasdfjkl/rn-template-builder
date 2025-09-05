@@ -135,6 +135,7 @@ jobs:
             echo "OUTPUT_TYPE=${{ github.event.inputs.output_type }}" >> $GITHUB_ENV
             echo "BUILD_ID=${{ github.event.inputs.build_id }}" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=false" >> $GITHUB_ENV
+            echo "APP_ICON=" >> $GITHUB_ENV
           fi
           
 
@@ -146,7 +147,7 @@ jobs:
           echo "APP_ICON starts with: $(echo -n "$APP_ICON" | cut -c 1-50)"
           echo "APP_ICON is null: $(if [ "$APP_ICON" = "null" ]; then echo "yes"; else echo "no"; fi)"
           echo "APP_ICON is empty: $(if [ -z "$APP_ICON" ]; then echo "yes"; else echo "no"; fi)"
-
+          echo "HAS_CUSTOM_ICON is true: $(if [ "$HAS_CUSTOM_ICON" = "true" ]; then echo "yes"; else echo "no"; fi)"
           
       - name: Install dependencies
         run: |
@@ -241,23 +242,22 @@ jobs:
               echo "Template customizations applied successfully"
 
       - name: Install Sharp for icon processing
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
         run: |
           echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
           npm install sharp --no-save
 
-
       - name: Process custom app icon
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
         run: |
           echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
 
           # Create Node.js script to process icon
           cat > process_icon.js << 'EOF'
-          // Enhanced process_icon.js
           const sharp = require('sharp');
           const fs = require('fs');
           const path = require('path');
+          const { execSync } = require('child_process');
 
           async function generateIcons() {
             try {
@@ -275,20 +275,33 @@ jobs:
                 const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
                 if (!matches) throw new Error('Invalid data URL format');
                 const [, imageType, base64Data] = matches;
-                if (!['png','jpeg','jpg','gif','webp'].includes(imageType.toLowerCase())) {
-                  throw new Error(`Unsupported image type: ${imageType}`);
-                }
                 iconBuffer = Buffer.from(base64Data, 'base64');
               } else {
                 throw new Error('App icon must be a base64 data URL');
               }
 
               const metadata = await sharp(iconBuffer).metadata();
+              console.log(`Original image: ${metadata.width}x${metadata.height}, format: ${metadata.format}`);
+
               if (metadata.width < 108 || metadata.height < 108) {
-                throw new Error('Icon too small for adaptive icons. Minimum size is 108x108 pixels');
+                console.warn('Warning: Icon is smaller than recommended 108x108 pixels for adaptive icons');
               }
 
               const androidResPath = 'android/app/src/main/res';
+
+              // Create res directories if they don't exist
+              const resDirs = [
+                'mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 
+                'mipmap-xxhdpi', 'mipmap-xxxhdpi',
+                'mipmap-anydpi-v26'
+              ];
+
+              resDirs.forEach(dir => {
+                const dirPath = path.join(androidResPath, dir);
+                if (!fs.existsSync(dirPath)) {
+                  fs.mkdirSync(dirPath, { recursive: true });
+                }
+              });
 
               // Standard launcher icons
               const iconConfigs = [
@@ -302,7 +315,6 @@ jobs:
               // Generate both standard and round icons
               for (const { size, folder } of iconConfigs) {
                 const folderPath = path.join(androidResPath, folder);
-                if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
 
                 // Standard icon
                 await sharp(iconBuffer)
@@ -311,10 +323,11 @@ jobs:
                   .toFile(path.join(folderPath, 'ic_launcher.png'));
 
                 // Round icon (cropped to circle)
+                const roundIconSvg = `<svg><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="white"/></svg>`;
                 await sharp(iconBuffer)
                   .resize(size, size, { fit: 'cover', position: 'center' })
                   .composite([{
-                    input: Buffer.from(`<svg><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="white"/></svg>`),
+                    input: Buffer.from(roundIconSvg),
                     blend: 'dest-in'
                   }])
                   .png()
@@ -323,11 +336,8 @@ jobs:
                 console.log(`Generated ${folder} icons (${size}x${size})`);
               }
 
-              // Create adaptive icon background and foreground
-              const adaptivePath = path.join(androidResPath, 'mipmap-anydpi-v26');
-              if (!fs.existsSync(adaptivePath)) fs.mkdirSync(adaptivePath, { recursive: true });
-
               // Create adaptive icon XML files
+              const adaptivePath = path.join(androidResPath, 'mipmap-anydpi-v26');
               const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
               <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
                   <background android:drawable="@color/ic_launcher_background"/>
@@ -337,7 +347,7 @@ jobs:
               fs.writeFileSync(path.join(adaptivePath, 'ic_launcher.xml'), adaptiveIconXml);
               fs.writeFileSync(path.join(adaptivePath, 'ic_launcher_round.xml'), adaptiveIconXml);
 
-              // Generate foreground icons (108dp for adaptive icons)
+              // Generate foreground icons for adaptive icons
               const foregroundConfigs = [
                 { size: 108, folder: 'mipmap-mdpi' },
                 { size: 162, folder: 'mipmap-hdpi' },
@@ -378,11 +388,8 @@ jobs:
           # Actually run the icon processing script
           node process_icon.js
 
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-
       - name: Verify Custom Icons
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
         run: |
           echo "Verifying custom icons were generated..."
           
@@ -410,6 +417,10 @@ jobs:
           fi
           
           echo "All required icons verified successfully"
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
 
       # Replace the "Build Android App" step:
       - name: Build Android App
@@ -480,12 +491,17 @@ jobs:
             grep -q "android:label=\"$APP_NAME\"" "$MANIFEST_PATH" || echo "Warning: App name not found in manifest"
             grep -q "package=\"$NAME_SPACE\"" "$MANIFEST_PATH" || echo "Warning: Package name not found in manifest"
             
-            # Ensure launcher icons are referenced
+            # Ensure launcher icons are referenced (only if custom icon was processed)
             if [ "$HAS_CUSTOM_ICON" = "true" ]; then
-              if ! grep -q "android:icon=\"@mipmap/ic_launcher\"" "$MANIFEST_PATH"; then
-                echo "Adding launcher icon reference to manifest..."
-                sed -i 's/<application/<application android:icon="@mipmap\/ic_launcher" android:roundIcon="@mipmap\/ic_launcher_round"/' "$MANIFEST_PATH"
-              fi
+              echo "Updating AndroidManifest.xml for custom icons..."
+              
+              # Backup original manifest
+              cp "$MANIFEST_PATH" "$MANIFEST_PATH.backup"
+              
+              # Add icon references to application tag
+              sed -i 's/<application\([^>]*\)>/<application\1 android:icon="@mipmap\/ic_launcher" android:roundIcon="@mipmap\/ic_launcher_round">/' "$MANIFEST_PATH"
+              
+              echo "Added custom icon references to AndroidManifest.xml"
             fi
             
             echo "AndroidManifest.xml validation completed"
