@@ -214,136 +214,136 @@ jobs:
           
           echo "Project structure validation completed successfully"
 
-      - name: Install Sharp for icon processing
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
-        run: |
-          echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
-          npm install sharp --no-save
+      # - name: Install Sharp for icon processing
+      #   if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
+      #   run: |
+      #     echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
+      #     npm install sharp --no-save
 
-      - name: Process custom app icon
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
-        run: |
-          echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
+      # - name: Process custom app icon
+      #   if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
+      #   run: |
+      #     echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
 
-          cat > process_icon.js << 'EOF'
-          const sharp = require('sharp');
-          const fs = require('fs');
-          const path = require('path');
+      #     cat > process_icon.js << 'EOF'
+      #     const sharp = require('sharp');
+      #     const fs = require('fs');
+      #     const path = require('path');
 
-          async function generateIcons() {
-            try {
-              const iconData = process.env.APP_ICON;
-              if (!iconData || iconData === 'null') {
-                console.log('No app icon provided');
-                return;
-              }
+      #     async function generateIcons() {
+      #       try {
+      #         const iconData = process.env.APP_ICON;
+      #         if (!iconData || iconData === 'null') {
+      #           console.log('No app icon provided');
+      #           return;
+      #         }
 
-              console.log('Processing app icon with adaptive icon support...');
+      #         console.log('Processing app icon with adaptive icon support...');
 
-              let iconBuffer;
-              if (iconData.startsWith('data:image/')) {
-                const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
-                if (!matches) throw new Error('Invalid data URL format');
-                const [, imageType, base64Data] = matches;
-                iconBuffer = Buffer.from(base64Data, 'base64');
-              } else {
-                throw new Error('App icon must be a base64 data URL');
-              }
+      #         let iconBuffer;
+      #         if (iconData.startsWith('data:image/')) {
+      #           const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
+      #           if (!matches) throw new Error('Invalid data URL format');
+      #           const [, imageType, base64Data] = matches;
+      #           iconBuffer = Buffer.from(base64Data, 'base64');
+      #         } else {
+      #           throw new Error('App icon must be a base64 data URL');
+      #         }
 
-              const metadata = await sharp(iconBuffer).metadata();
-              console.log(`Original image: ${metadata.width}x${metadata.height}, format: ${metadata.format}`);
+      #         const metadata = await sharp(iconBuffer).metadata();
+      #         console.log(`Original image: ${metadata.width}x${metadata.height}, format: ${metadata.format}`);
 
-              const androidResPath = 'android/app/src/main/res';
+      #         const androidResPath = 'android/app/src/main/res';
 
-              const resDirs = [
-                'mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 
-                'mipmap-xxhdpi', 'mipmap-xxxhdpi',
-                'mipmap-anydpi-v26'
-              ];
+      #         const resDirs = [
+      #           'mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 
+      #           'mipmap-xxhdpi', 'mipmap-xxxhdpi',
+      #           'mipmap-anydpi-v26'
+      #         ];
 
-              resDirs.forEach(dir => {
-                const dirPath = path.join(androidResPath, dir);
-                if (!fs.existsSync(dirPath)) {
-                  fs.mkdirSync(dirPath, { recursive: true });
-                }
-              });
+      #         resDirs.forEach(dir => {
+      #           const dirPath = path.join(androidResPath, dir);
+      #           if (!fs.existsSync(dirPath)) {
+      #             fs.mkdirSync(dirPath, { recursive: true });
+      #           }
+      #         });
 
-              const iconConfigs = [
-                { size: 48, folder: 'mipmap-mdpi' },
-                { size: 72, folder: 'mipmap-hdpi' },
-                { size: 96, folder: 'mipmap-xhdpi' },
-                { size: 144, folder: 'mipmap-xxhdpi' },
-                { size: 192, folder: 'mipmap-xxxhdpi' },
-              ];
+      #         const iconConfigs = [
+      #           { size: 48, folder: 'mipmap-mdpi' },
+      #           { size: 72, folder: 'mipmap-hdpi' },
+      #           { size: 96, folder: 'mipmap-xhdpi' },
+      #           { size: 144, folder: 'mipmap-xxhdpi' },
+      #           { size: 192, folder: 'mipmap-xxxhdpi' },
+      #         ];
 
-              for (const { size, folder } of iconConfigs) {
-                const folderPath = path.join(androidResPath, folder);
+      #         for (const { size, folder } of iconConfigs) {
+      #           const folderPath = path.join(androidResPath, folder);
 
-                await sharp(iconBuffer)
-                  .resize(size, size, { fit: 'cover', position: 'center' })
-                  .png()
-                  .toFile(path.join(folderPath, 'ic_launcher.png'));
+      #           await sharp(iconBuffer)
+      #             .resize(size, size, { fit: 'cover', position: 'center' })
+      #             .png()
+      #             .toFile(path.join(folderPath, 'ic_launcher.png'));
 
-                const roundIconSvg = `<svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="white"/></svg>`;
-                await sharp(iconBuffer)
-                  .resize(size, size, { fit: 'cover', position: 'center' })
-                  .composite([{
-                    input: Buffer.from(roundIconSvg),
-                    blend: 'dest-in'
-                  }])
-                  .png()
-                  .toFile(path.join(folderPath, 'ic_launcher_round.png'));
+      #           const roundIconSvg = `<svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="white"/></svg>`;
+      #           await sharp(iconBuffer)
+      #             .resize(size, size, { fit: 'cover', position: 'center' })
+      #             .composite([{
+      #               input: Buffer.from(roundIconSvg),
+      #               blend: 'dest-in'
+      #             }])
+      #             .png()
+      #             .toFile(path.join(folderPath, 'ic_launcher_round.png'));
 
-                console.log(`Generated ${folder} icons (${size}x${size})`);
-              }
+      #           console.log(`Generated ${folder} icons (${size}x${size})`);
+      #         }
 
-              const adaptivePath = path.join(androidResPath, 'mipmap-anydpi-v26');
-              const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
-              <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-                  <background android:drawable="@color/ic_launcher_background"/>
-                  <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-              </adaptive-icon>`;
+      #         const adaptivePath = path.join(androidResPath, 'mipmap-anydpi-v26');
+      #         const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
+      #         <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+      #             <background android:drawable="@color/ic_launcher_background"/>
+      #             <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+      #         </adaptive-icon>`;
 
-              fs.writeFileSync(path.join(adaptivePath, 'ic_launcher.xml'), adaptiveIconXml);
-              fs.writeFileSync(path.join(adaptivePath, 'ic_launcher_round.xml'), adaptiveIconXml);
+      #         fs.writeFileSync(path.join(adaptivePath, 'ic_launcher.xml'), adaptiveIconXml);
+      #         fs.writeFileSync(path.join(adaptivePath, 'ic_launcher_round.xml'), adaptiveIconXml);
 
-              const foregroundConfigs = [
-                { size: 108, folder: 'mipmap-mdpi' },
-                { size: 162, folder: 'mipmap-hdpi' },
-                { size: 216, folder: 'mipmap-xhdpi' },
-                { size: 324, folder: 'mipmap-xxhdpi' },
-                { size: 432, folder: 'mipmap-xxxhdpi' },
-              ];
+      #         const foregroundConfigs = [
+      #           { size: 108, folder: 'mipmap-mdpi' },
+      #           { size: 162, folder: 'mipmap-hdpi' },
+      #           { size: 216, folder: 'mipmap-xhdpi' },
+      #           { size: 324, folder: 'mipmap-xxhdpi' },
+      #           { size: 432, folder: 'mipmap-xxxhdpi' },
+      #         ];
 
-              for (const { size, folder } of foregroundConfigs) {
-                const folderPath = path.join(androidResPath, folder);
-                await sharp(iconBuffer)
-                  .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-                  .png()
-                  .toFile(path.join(folderPath, 'ic_launcher_foreground.png'));
-              }
+      #         for (const { size, folder } of foregroundConfigs) {
+      #           const folderPath = path.join(androidResPath, folder);
+      #           await sharp(iconBuffer)
+      #             .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      #             .png()
+      #             .toFile(path.join(folderPath, 'ic_launcher_foreground.png'));
+      #         }
 
-              const valuesPath = path.join(androidResPath, 'values');
-              if (!fs.existsSync(valuesPath)) fs.mkdirSync(valuesPath, { recursive: true });
+      #         const valuesPath = path.join(androidResPath, 'values');
+      #         if (!fs.existsSync(valuesPath)) fs.mkdirSync(valuesPath, { recursive: true });
               
-              const colorsXml = `<?xml version="1.0" encoding="utf-8"?>
-              <resources>
-                  <color name="ic_launcher_background">#FFFFFF</color>
-              </resources>`;
+      #         const colorsXml = `<?xml version="1.0" encoding="utf-8"?>
+      #         <resources>
+      #             <color name="ic_launcher_background">#FFFFFF</color>
+      #         </resources>`;
               
-              fs.writeFileSync(path.join(valuesPath, 'colors.xml'), colorsXml);
+      #         fs.writeFileSync(path.join(valuesPath, 'colors.xml'), colorsXml);
 
-              console.log('Adaptive icon setup completed successfully!');
-            } catch (error) {
-              console.error('Icon processing failed:', error.message);
-              process.exit(1);
-            }
-          }
+      #         console.log('Adaptive icon setup completed successfully!');
+      #       } catch (error) {
+      #         console.error('Icon processing failed:', error.message);
+      #         process.exit(1);
+      #       }
+      #     }
 
-          generateIcons();
-          EOF
+      #     generateIcons();
+      #     EOF
 
-          node process_icon.js
+      #     node process_icon.js
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
