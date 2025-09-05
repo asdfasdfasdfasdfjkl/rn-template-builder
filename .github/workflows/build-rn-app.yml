@@ -42,49 +42,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 18 with cache
+      - name: Setup Node.js 18
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Cache Android SDK
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.android/build-cache
-            ~/.android/cache
-          key: ${{ runner.os }}-android-cache-${{ hashFiles('**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-android-cache-
-
-      - name: Cache Gradle dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: Cache node_modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
 
       - name: Read build configuration
         id: config
@@ -137,7 +104,6 @@ jobs:
             echo "HAS_CUSTOM_ICON=false" >> $GITHUB_ENV
             echo "APP_ICON=" >> $GITHUB_ENV
           fi
-          
 
       - name: Debug icon configuration
         run: |
@@ -152,7 +118,7 @@ jobs:
       - name: Install dependencies
         run: |
           echo "status=Installing npm dependencies..." >> $GITHUB_OUTPUT
-          npm ci --no-audit --no-fund --prefer-offline
+          npm ci --no-audit --no-fund
 
       - name: Apply template customizations
         shell: bash
@@ -273,7 +239,7 @@ jobs:
               let iconBuffer;
               if (iconData.startsWith('data:image/')) {
                 const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
-                if (!matches) throw new Error('Invalid data URL format');
+                if (!matches) throw newError('Invalid data URL format');
                 const [, imageType, base64Data] = matches;
                 iconBuffer = Buffer.from(base64Data, 'base64');
               } else {
@@ -421,8 +387,20 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
+      - name: Clean previous builds
+        run: |
+          echo "status=Cleaning previous builds..." >> $GITHUB_OUTPUT
+          cd android
+          
+          # Clean Gradle build directories
+          ./gradlew clean --no-daemon --console=plain
+          
+          # Remove build directories to ensure fresh build
+          rm -rf app/build/
+          rm -rf build/
+          
+          echo "Previous builds cleaned successfully"
 
-      # Replace the "Build Android App" step:
       - name: Build Android App
         run: |
           echo "status=Building Android application..." >> $GITHUB_OUTPUT
@@ -456,7 +434,7 @@ jobs:
           echo "Running: ./gradlew $GRADLE_TASK"
 
           # Run the build with proper caching and cleanup
-          ./gradlew $GRADLE_TASK --stacktrace --info --no-daemon
+          ./gradlew $GRADLE_TASK --no-daemon --console=plain
 
           # Verify the build output
           if [ ! -f "$BUILT_PATH" ]; then
