@@ -119,27 +119,49 @@ jobs:
           # Ensure we escape special characters properly when replacing
           esc() { printf '%s' "$1" | sed 's/[]\/$*.^[]/\\&/g'; }
 
-          # Ensure the paths for replacement are valid and the files exist before applying changes
-          if [ -f "package.json" ]; then
-            sed -i "s/\"name\": \".*\"/\"name\": \"$(esc "$APP_NAME")\"/" package.json
+          # Replace placeholders in app.tsx
+          if [ -f "app.tsx" ]; then
+            echo "Processing template placeholders in: app.tsx"
+            sed -i "s/{{website_address}}/$WEBSITE_ADDRESS/g" app.tsx
           fi
 
-          find . -type f \( -name "*.gradle" -o -name "*.xml" -o -name "*.json" -o -name "*.js" -o -name "*.ts" -o -name "*.kt" -o -name "*.java" \) | while read file; do
-            if [ -f "$file" ] && grep -q "{{" "$file" 2>/dev/null; then
-              echo "Processing template placeholders in: $file"
-              sed -i \
-                -e "s/{{app_name}}/$(esc "$APP_NAME")/g" \
-                -e "s/{{version_code}}/$VERSION_CODE/g" \
-                -e "s/{{version_name}}/$(esc "$VERSION_NAME")/g" \
-                -e "s/{{name_space}}/$(esc "$NAME_SPACE")/g" \
-                -e "s/{{website_address}}/$(esc "$WEBSITE_ADDRESS")/g" \
-                "$file"
-            fi
-          done
+          # Replace placeholders in app.json (twice for app_name)
+          if [ -f "app.json" ]; then
+            echo "Processing template placeholders in: app.json"
+            sed -i "s/{{app_name}}/$(esc "$APP_NAME")/g" app.json
+            sed -i "s/{{app_name}}/$(esc "$APP_NAME")/g" app.json
+          fi
+
+          # Replace placeholders in android/app/build.gradle
+          if [ -f "android/app/build.gradle" ]; then
+            echo "Processing template placeholders in: android/app/build.gradle"
+            sed -i "s/{{version_code}}/$VERSION_CODE/g" android/app/build.gradle
+            sed -i "s/{{version_name}}/$(esc "$VERSION_NAME")/g" android/app/build.gradle
+            sed -i "s/{{name_space}}/$(esc "$NAME_SPACE")/g" android/app/build.gradle
+            sed -i "s/{{name_space}}/$(esc "$NAME_SPACE")/g" android/app/build.gradle
+          fi
+
+          # Replace placeholders in MainActivity.kt
+          if [ -f "android/app/src/main/java/com/rn_project_template/MainActivity.kt" ]; then
+            echo "Processing template placeholders in: android/app/src/main/java/com/rn_project_template/MainActivity.kt"
+            sed -i "s/{{name_space}}/$(esc "$NAME_SPACE")/g" android/app/src/main/java/com/rn_project_template/MainActivity.kt
+          fi
+
+          # Replace placeholders in MainApplication.kt
+          if [ -f "android/app/src/main/java/com/rn_project_template/MainApplication.kt" ]; then
+            echo "Processing template placeholders in: android/app/src/main/java/com/rn_project_template/MainApplication.kt"
+            sed -i "s/{{name_space}}/$(esc "$NAME_SPACE")/g" android/app/src/main/java/com/rn_project_template/MainApplication.kt
+          fi
+
+          # Handle app icon replacement if needed (if it needs to be placed here)
+          if [ "$HAS_CUSTOM_ICON" = "true" ] && [ -n "$APP_ICON" ]; then
+            echo "status=Processing app icon..." >> $GITHUB_OUTPUT
+            # Add the app icon processing step here if it's part of this step
+            # If icon processing is done in a different step, skip this part
+          fi
 
           echo "Template customizations applied successfully"
           touch .customization-applied
-
 
 
       - name: Validate Android project structure
