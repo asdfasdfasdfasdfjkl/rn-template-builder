@@ -1,4 +1,4 @@
-name: Build React Native App
+name: Build React Native Android App
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -46,7 +46,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -57,47 +56,27 @@ jobs:
       - name: Read build configuration
         id: config
         run: |
-          if [ -f "build-config.json" ]; then
-            BUILD_ID=$(jq -r '.buildId // "${{ github.event.inputs.build_id }}"' build-config.json)
-            APP_NAME=$(jq -r '.app_name // "${{ github.event.inputs.app_name }}"' build-config.json)
-            WEBSITE_ADDRESS=$(jq -r '.website_address' build-config.json)
-            VERSION_CODE=$(jq -r '.version_code // "1"' build-config.json)
-            VERSION_NAME=$(jq -r '.version_name // "1.0.0"' build-config.json)
-            NAME_SPACE=$(jq -r '.name_space // "com.example.app"' build-config.json)
-            BUILD_TYPE=$(jq -r '.buildType // "${{ github.event.inputs.build_type }}"' build-config.json)
-            OUTPUT_TYPE=$(jq -r '.outputType // "${{ github.event.inputs.output_type }}"' build-config.json)
-            HAS_CUSTOM_ICON=$(jq -r '.has_custom_icon // "false"' build-config.json)
-            APP_ICON=$(jq -r '.app_icon // null' build-config.json)
-            
-            echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
-            echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
-            echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
-            echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
-            echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
-            echo "NAME_SPACE=$NAME_SPACE" >> $GITHUB_ENV
-            echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_ENV
-            echo "OUTPUT_TYPE=$OUTPUT_TYPE" >> $GITHUB_ENV
-            echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
-            echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
-            
-            if [ "$OUTPUT_TYPE" = "aab" ]; then
-              echo "BUILT_PATH=app/build/outputs/bundle/${BUILD_TYPE}/app-${BUILD_TYPE}.aab" >> $GITHUB_ENV
-            else
-              echo "BUILT_PATH=app/build/outputs/apk/${BUILD_TYPE}/app-${BUILD_TYPE}.apk" >> $GITHUB_ENV
-            fi
-            
-            echo "Configuration loaded successfully"
-          else
-            echo "No build-config.json found, using workflow inputs"
-            echo "BUILD_ID=${{ github.event.inputs.build_id }}" >> $GITHUB_ENV
-            echo "APP_NAME=${{ github.event.inputs.app_name }}" >> $GITHUB_ENV
-            echo "BUILD_TYPE=${{ github.event.inputs.build_type }}" >> $GITHUB_ENV
-            echo "OUTPUT_TYPE=${{ github.event.inputs.output_type }}" >> $GITHUB_ENV
-          fi
+          echo "Loading build configuration..."
+          BUILD_ID="${{ github.event.inputs.build_id }}"
+          APP_NAME="${{ github.event.inputs.app_name }}"
+          WEBSITE_ADDRESS="${{ github.event.inputs.website_address || 'default.com' }}"
+          VERSION_CODE="${{ github.event.inputs.version_code || '1' }}"
+          VERSION_NAME="${{ github.event.inputs.version_name || '1.0.0' }}"
+          NAME_SPACE="${{ github.event.inputs.name_space || 'com.example.app' }}"
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
+          OUTPUT_TYPE="${{ github.event.inputs.output_type || 'apk' }}"
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
+          echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
+          echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "NAME_SPACE=$NAME_SPACE" >> $GITHUB_ENV
+          echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_ENV
+          echo "OUTPUT_TYPE=$OUTPUT_TYPE" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: |
-          echo "Installing Node.js dependencies..."
+          echo "Installing dependencies..."
           npm ci --legacy-peer-deps
           echo "Dependencies installed successfully"
 
@@ -105,131 +84,47 @@ jobs:
         shell: bash
         run: |
           echo "Applying template customizations..."
-          
-          # Replace placeholders in app.tsx
-          if [ -f "App.tsx" ]; then
-            sed -i "s|{{website_address}}|${WEBSITE_ADDRESS}|g" App.tsx
-            echo "Updated App.tsx with website address"
-          fi
-          
-          # Replace placeholders in app.json
-          if [ -f "app.json" ]; then
-            sed -i "s|{{app_name}}|${APP_NAME}|g" app.json
-            echo "Updated app.json with app name"
-          fi
-          
-          # Replace placeholders in android/app/build.gradle
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i "s|{{version_code}}|${VERSION_CODE}|g" android/app/build.gradle
-            sed -i "s|{{version_name}}|${VERSION_NAME}|g" android/app/build.gradle
-            sed -i "s|{{name_space}}|${NAME_SPACE}|g" android/app/build.gradle
-            echo "Updated android/app/build.gradle"
-          fi
-          
-          # Update package structure for namespace
-          OLD_PACKAGE_PATH="android/app/src/main/java/com/rn_project_template"
-          NEW_PACKAGE_PATH="android/app/src/main/java/$(echo ${NAME_SPACE} | tr '.' '/')"
-          
-          if [ -d "$OLD_PACKAGE_PATH" ]; then
-            # Create new directory structure
-            mkdir -p "$(dirname "$NEW_PACKAGE_PATH")"
-            mv "$OLD_PACKAGE_PATH" "$NEW_PACKAGE_PATH"
-            
-            # Update MainActivity.kt
-            if [ -f "$NEW_PACKAGE_PATH/MainActivity.kt" ]; then
-              sed -i "s|package com.rn_project_template|package ${NAME_SPACE}|g" "$NEW_PACKAGE_PATH/MainActivity.kt"
-              echo "Updated MainActivity.kt package"
-            fi
-            
-            # Update MainApplication.kt
-            if [ -f "$NEW_PACKAGE_PATH/MainApplication.kt" ]; then
-              sed -i "s|package com.rn_project_template|package ${NAME_SPACE}|g" "$NEW_PACKAGE_PATH/MainApplication.kt"
-              echo "Updated MainApplication.kt package"
-            fi
-            
-            echo "Updated package structure from com.rn_project_template to ${NAME_SPACE}"
-          fi
-          
-          # Update AndroidManifest.xml
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            sed -i "s|com\.rn_project_template|${NAME_SPACE}|g" android/app/src/main/AndroidManifest.xml
-            echo "Updated AndroidManifest.xml"
-          fi
-          
-          # Update strings.xml
-          if [ -f "android/app/src/main/res/values/strings.xml" ]; then
-            sed -i "s|<string name=\"app_name\">.*</string>|<string name=\"app_name\">${APP_NAME}</string>|g" android/app/src/main/res/values/strings.xml
-            echo "Updated strings.xml"
-          fi
-          
+          sed -i "s|{{website_address}}|${{ env.WEBSITE_ADDRESS }}|g" app.tsx
+          sed -i "s|{{app_name}}|${{ env.APP_NAME }}|g" app.json
+          sed -i "s|{{version_code}}|${{ env.VERSION_CODE }}|g" android/app/build.gradle
+          sed -i "s|{{version_name}}|${{ env.VERSION_NAME }}|g" android/app/build.gradle
+          sed -i "s|{{name_space}}|${{ env.NAME_SPACE }}|g" android/app/build.gradle
           echo "Template customizations applied successfully"
 
       - name: Install Sharp for icon processing
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
+        if: ${{ env.APP_ICON != 'null' }}
         run: |
           echo "Installing Sharp for icon processing..."
           npm install sharp --no-save
 
       - name: Process custom app icon
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
+        if: ${{ env.APP_ICON != 'null' }}
         run: |
           echo "Processing custom app icon..."
-          
-          # Create icon processing script
-          cat > process_icon.js << 'EOF'
-          const sharp = require('sharp');
-          const fs = require('fs');
-          const path = require('path');
-          
-          const appIcon = process.env.APP_ICON;
-          if (!appIcon || appIcon === 'null') {
-            console.log('No app icon provided');
-            process.exit(0);
-          }
-          
-          // Extract base64 data
-          const base64Data = appIcon.replace(/^data:image\/\w+;base64,/, '');
-          const buffer = Buffer.from(base64Data, 'base64');
-          
-          // Android icon sizes and paths
-          const androidSizes = [
-            { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png' },
-            { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png' },
-            { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher.png' },
-            { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher.png' },
-            { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher.png' },
-            { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png' },
-            { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png' },
-            { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png' },
-            { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png' },
-            { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png' },
-          ];
-          
-          async function generateIcons() {
-            for (const config of androidSizes) {
+          node -e "
+            const sharp = require('sharp');
+            const fs = require('fs');
+            const appIcon = '${{ env.APP_ICON }}';
+            const base64Data = appIcon.replace(/^data:image\\/\\w+;base64,/, '');
+            const buffer = Buffer.from(base64Data, 'base64');
+            const androidSizes = [
+              { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png' },
+              { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png' },
+              { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher.png' },
+              { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher.png' },
+              { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher.png' }
+            ];
+            androidSizes.forEach(async (config) => {
               const dir = path.dirname(config.path);
               if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, { recursive: true });
               }
-              
               await sharp(buffer)
                 .resize(config.size, config.size)
                 .png()
                 .toFile(config.path);
-              
-              console.log(`Generated ${config.path} (${config.size}x${config.size})`);
-            }
-          }
-          
-          generateIcons().then(() => {
-            console.log('All icons generated successfully');
-          }).catch(err => {
-            console.error('Error generating icons:', err);
-            process.exit(1);
-          });
-          EOF
-          
-          node process_icon.js
+            });
+          "
           echo "Custom app icon processed and generated for all densities"
 
       - name: Make gradlew executable
@@ -237,47 +132,35 @@ jobs:
 
       - name: Clean previous builds
         run: |
-          echo "Cleaning previous builds..."
           cd android
           ./gradlew clean
-          echo "Clean completed"
 
       - name: Build Android App
         run: |
-          echo "Building Android app..."
           cd android
-          
-          if [ "$BUILD_TYPE" = "release" ]; then
-            if [ "$OUTPUT_TYPE" = "aab" ]; then
-              echo "Building release AAB..."
-              ./gradlew bundleRelease --no-daemon --stacktrace
+          if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
+            if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
+              ./gradlew bundleRelease
             else
-              echo "Building release APK..."
-              ./gradlew assembleRelease --no-daemon --stacktrace
+              ./gradlew assembleRelease
             fi
           else
-            if [ "$OUTPUT_TYPE" = "aab" ]; then
-              echo "Building debug AAB..."
-              ./gradlew bundleDebug --no-daemon --stacktrace
+            if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
+              ./gradlew bundleDebug
             else
-              echo "Building debug APK..."
-              ./gradlew assembleDebug --no-daemon --stacktrace
+              ./gradlew assembleDebug
             fi
           fi
-          
-          echo "Build completed successfully"
 
       - name: Prepare build artifacts
         run: |
-          echo "Preparing build artifacts..."
+          echo "status=Preparing build artifacts..." >> $GITHUB_OUTPUT
           BUILD_ID="${BUILD_ID:-${{ github.event.inputs.build_id }}}"
           APP_NAME="${APP_NAME:-${{ github.event.inputs.app_name }}}"
           BUILD_TYPE="${BUILD_TYPE:-${{ github.event.inputs.build_type }}}"
           OUTPUT_TYPE="${OUTPUT_TYPE:-${{ github.event.inputs.output_type }}}"
-
           mkdir -p artifacts
-
-          BUILT_FILE="android/${BUILT_PATH}"
+          BUILT_FILE="android/app/build/outputs/${{ env.OUTPUT_TYPE }}/${{ env.BUILD_TYPE }}/app-${{ env.BUILD_TYPE }}.${{ env.OUTPUT_TYPE }}"
           ARTIFACT_NAME="app-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
 
           if [ -f "$BUILT_FILE" ]; then
@@ -285,8 +168,6 @@ jobs:
             echo "Copied $BUILT_FILE to artifacts/$ARTIFACT_NAME"
           else
             echo "Error: Built file not found at $BUILT_FILE"
-            echo "Directory contents:"
-            find android/app/build/outputs/ -type f -name "*.apk" -o -name "*.aab" 2>/dev/null || echo "No APK/AAB files found"
             exit 1
           fi
 
@@ -307,10 +188,6 @@ jobs:
           }
           EOF
 
-          echo "Build artifacts prepared successfully"
-          ls -la artifacts/
-          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -320,7 +197,7 @@ jobs:
 
       - name: Upload to AWS S3
         run: |
-          echo "Uploading artifacts to AWS S3..."
+          echo "status=Uploading artifacts to AWS S3..." >> $GITHUB_OUTPUT
           BUILD_ID="${BUILD_ID:-${{ github.event.inputs.build_id }}}"
           S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
           S3_PREFIX="builds/${BUILD_ID}"
@@ -330,71 +207,45 @@ jobs:
             exit 1
           fi
 
-          # Upload all artifacts
           aws s3 cp artifacts/ s3://${S3_BUCKET}/${S3_PREFIX}/ --recursive
 
-          # Generate presigned URLs (valid for 7 days)
           APP_DOWNLOAD_URL=$(aws s3 presign s3://${S3_BUCKET}/${S3_PREFIX}/${ARTIFACT_NAME} --expires-in 604800)
           INFO_DOWNLOAD_URL=$(aws s3 presign s3://${S3_BUCKET}/${S3_PREFIX}/build-info.json --expires-in 604800)
 
           echo "APP_DOWNLOAD_URL=$APP_DOWNLOAD_URL" >> $GITHUB_ENV
           echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
 
-          echo "Successfully uploaded to S3: s3://${S3_BUCKET}/${S3_PREFIX}/"
-          echo "Download URL: $APP_DOWNLOAD_URL"
-
       - name: Update build status
         if: always()
         run: |
           BUILD_ID="${BUILD_ID:-${{ github.event.inputs.build_id }}}"
           S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
-
-          if [ "${{ job.status }}" = "success" ]; then
+          if [ "${{ job.status }}" == "success" ]; then
             STATUS="completed"
             CONCLUSION="success"
-            if [ "$HAS_CUSTOM_ICON" = "true" ]; then
-              MESSAGE="Build completed successfully with custom app icon and uploaded to S3"
-            else
-              MESSAGE="Build completed successfully and uploaded to S3"
-            fi
+            MESSAGE="Build completed successfully"
           else
-            STATUS="completed"  
+            STATUS="completed"
             CONCLUSION="failure"
-            MESSAGE="Build failed - check logs for details"
+            MESSAGE="Build failed"
           fi
 
           cat > build-status.json << EOF
           {
             "buildId": "$BUILD_ID",
             "status": "$STATUS",
-            "conclusion": "$CONCLUSION", 
+            "conclusion": "$CONCLUSION",
             "message": "$MESSAGE",
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "downloadUrl": "${APP_DOWNLOAD_URL:-null}",
-            "infoUrl": "${INFO_DOWNLOAD_URL:-null}",
-            "repoUrl": "${{ github.server_url }}/${{ github.repository }}",
-            "hasCustomIcon": "${HAS_CUSTOM_ICON:-false}",
-            "artifactName": "${ARTIFACT_NAME:-null}",
-            "fileSize": "$([ -f "artifacts/${ARTIFACT_NAME}" ] && stat -c%s "artifacts/${ARTIFACT_NAME}" || echo "null")"
+            "infoUrl": "${INFO_DOWNLOAD_URL:-null}"
           }
           EOF
 
-          if [ -n "$S3_BUCKET" ]; then
-            aws s3 cp build-status.json s3://${S3_BUCKET}/status/${BUILD_ID}.json
-            echo "Status uploaded to S3"
-          fi
+          aws s3 cp build-status.json s3://${S3_BUCKET}/status/${BUILD_ID}.json
 
       - name: Cleanup and delete repository
         if: always()
         run: |
-          echo "Build process completed"
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Build completed successfully!"
-            echo "📱 App artifact: ${ARTIFACT_NAME}"
-            echo "☁️ Uploaded to S3 bucket: ${{ secrets.AWS_S3_BUCKET }}"
-            echo "🔗 Download will be available via API"
-          else
-            echo "❌ Build failed!"
-            echo "Check the logs above for error details"
-          fi
-          echo "🗑️ Repository will be automatically deleted by the API"
+          echo "status=Cleaning up and deleting repository..." >> $GITHUB_OUTPUT
+          echo "Repository cleanup will be handled by the API caller"
