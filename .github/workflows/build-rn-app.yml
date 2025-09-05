@@ -410,12 +410,11 @@ jobs:
         # Optimized Gradle settings for maximum speed
         export GRADLE_OPTS="-Xmx4g -Dorg.gradle.daemon=true -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true -Dorg.gradle.caching=true"
         
-        # Run the build with maximum optimizations
+        # Run the build with maximum optimizations (REMOVED --offline flag)
         ./gradlew $GRADLE_TASK \
-          --no-build-cache \
-          --no-configure-on-demand \
+          --build-cache \
+          --configure-on-demand \
           --parallel \
-          --offline \
           --profile \
           -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxMetaspaceSize=1g" \
           -Dorg.gradle.parallel.threads=4 \
