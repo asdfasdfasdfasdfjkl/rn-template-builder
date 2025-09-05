@@ -1,4 +1,3 @@
-# .github/workflows/build-rn-app.yml
 name: Build React Native App
 
 on:
@@ -34,10 +33,14 @@ on:
         default: 'android'
         type: string
 
+  # Add this to also allow the workflow to be triggered on push to main branch
+  push:
+    branches: [ main, master ]
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     
     steps:
     - name: Checkout code
@@ -67,18 +70,17 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-android-cache-
           
-    - name: Cache Gradle dependencies (optimized)
+    - name: Cache Gradle dependencies
       uses: actions/cache@v4
       with:
         path: |
           ~/.gradle/caches
           ~/.gradle/wrapper
-          ~/.gradle/daemon
         key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
         restore-keys: |
           ${{ runner.os }}-gradle-
           
-    - name: Cache node_modules (optimized)
+    - name: Cache node_modules
       uses: actions/cache@v4
       with:
         path: |
@@ -87,46 +89,6 @@ jobs:
         key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
         restore-keys: |
           ${{ runner.os }}-node-
-
-    - name: Cache Android build outputs
-      uses: actions/cache@v4
-      with:
-        path: |
-          android/app/build
-          android/.gradle
-        key: ${{ runner.os }}-android-build-${{ github.event.inputs.build_id }}-${{ github.event.inputs.build_type }}-${{ github.event.inputs.output_type }}
-        restore-keys: |
-          ${{ runner.os }}-android-build-
-
-    # ✅ Cache node_modules
-    - name: Cache node_modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            **/node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
-    # ✅ Cache Gradle
-    - name: Cache Gradle
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-
-    # ✅ Cache Android NDK
-    - name: Cache Android NDK
-      uses: actions/cache@v3
-      with:
-        path: /usr/local/lib/android/sdk/ndk
-        key: ${{ runner.os }}-ndk-25.2.9519653 # set your NDK version
-        restore-keys: |
-          ${{ runner.os }}-ndk-
 
     - name: Read build configuration
       id: config
@@ -169,13 +131,12 @@ jobs:
           echo "HAS_CUSTOM_ICON=false" >> $GITHUB_ENV
         fi
         
-    - name: Install dependencies (optimized)
+    - name: Install dependencies
       run: |
         echo "status=Installing npm dependencies..." >> $GITHUB_OUTPUT
-        # Use ci for faster, reliable installs with aggressive caching
-        npm ci --no-audit --no-fund --prefer-offline --silent
+        npm ci --no-audit --no-fund --prefer-offline
         
-    - name: Apply template customizations (optimized)
+    - name: Apply template customizations
       shell: bash
       run: |
         echo "status=Applying template customizations..." >> $GITHUB_OUTPUT
@@ -204,7 +165,7 @@ jobs:
         fi
         echo "Middle segment: $MIDDLE_SEGMENT"
 
-        # Escape replacements for sed: escape \, /, &
+        # Escape replacements for sed
         esc() { printf '%s' "$1" | sed -e 's/[\\/&]/\\&/g'; }
 
         WEBSITE_ADDRESS_ESC=$(esc "$WEBSITE_ADDRESS")
@@ -214,20 +175,15 @@ jobs:
         NAME_SPACE_ESC=$(esc "$NAME_SPACE")
         MIDDLE_SEGMENT_ESC=$(esc "$MIDDLE_SEGMENT")
 
-        # Apply replacements in parallel, using | as delimiter
-        export WEBSITE_ADDRESS_ESC APP_NAME_ESC VERSION_CODE_ESC VERSION_NAME_ESC NAME_SPACE_ESC MIDDLE_SEGMENT_ESC
-        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -print0 \
-        | xargs -0 -P 8 -I {} bash -c '
-          sed -i \
-            -e "s|rn_project_template|$MIDDLE_SEGMENT_ESC|g" \
-            -e "s|{{website_address}}|$WEBSITE_ADDRESS_ESC|g" \
-            -e "s|{{app_name}}|$APP_NAME_ESC|g" \
-            -e "s|{{version_code}}|$VERSION_CODE_ESC|g" \
-            -e "s|{{version_name}}|$VERSION_NAME_ESC|g" \
-            -e "s|com\.rn_project_template|$NAME_SPACE_ESC|g" \
-            -e "s|{{name_space}}|$NAME_SPACE_ESC|g" \
-            "{}"
-        '
+        # Apply replacements
+        find . -type f \( -name "*.gradle" -o -name "*.json" -o -name "*.xml" -o -name "*.tsx" -o -name "*.kt" \) -exec sed -i \
+          -e "s/rn_project_template/$MIDDLE_SEGMENT_ESC/g" \
+          -e "s/{{website_address}}/$WEBSITE_ADDRESS_ESC/g" \
+          -e "s/{{app_name}}/$APP_NAME_ESC/g" \
+          -e "s/{{version_code}}/$VERSION_CODE_ESC/g" \
+          -e "s/{{version_name}}/$VERSION_NAME_ESC/g" \
+          -e "s/com\.rn_project_template/$NAME_SPACE_ESC/g" \
+          -e "s/{{name_space}}/$NAME_SPACE_ESC/g" {} \;
 
         # Restructure Java/Kotlin package directories
         echo "Restructuring Java packages..."
@@ -247,15 +203,14 @@ jobs:
       if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
       run: |
         echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
-        # Install sharp for image processing
-        npm install sharp --no-save --silent --prefer-offline
+        npm install sharp --no-save
         
-    - name: Process custom app icon (optimized)
+    - name: Process custom app icon
       if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
       run: |
         echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
 
-        # Create optimized Node.js script to process icon
+        # Create Node.js script to process icon
         cat > process_icon.js << 'EOF'
         const sharp = require('sharp');
         const fs = require('fs');
@@ -308,48 +263,15 @@ jobs:
               const outputPath = path.join(folderPath, filename);
               await sharp(iconBuffer)
                 .resize(size, size, { fit: 'cover', position: 'center' })
-                .png({ quality: 85, compressionLevel: 6 })
+                .png()
                 .toFile(outputPath);
 
-              console.log(`✓ Generated ${folder}/${filename} (${size}x${size})`);
+              console.log(`Generated ${folder}/${filename} (${size}x${size})`);
             }
 
-            // adaptive icons
-            const mipmapV26Path = path.join(androidResPath, "mipmap-anydpi-v26");
-            if (!fs.existsSync(mipmapV26Path)) {
-              fs.mkdirSync(mipmapV26Path, { recursive: true });
-            }
-
-            const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
-            <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-                <background android:drawable="@color/ic_launcher_background"/>
-                <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-            </adaptive-icon>
-            `;
-
-            fs.writeFileSync(path.join(mipmapV26Path, "ic_launcher.xml"), adaptiveIconXml);
-            fs.writeFileSync(path.join(mipmapV26Path, "ic_launcher_round.xml"), adaptiveIconXml);
-
-            await sharp(iconBuffer)
-              .resize(108, 108)
-              .png()
-              .toFile(path.join(mipmapV26Path, "ic_launcher_foreground.png"));
-
-            const colorsPath = path.join(androidResPath, "values/colors.xml");
-            if (fs.existsSync(colorsPath)) {
-              let colorsXml = fs.readFileSync(colorsPath, "utf8");
-              if (!colorsXml.includes("ic_launcher_background")) {
-                colorsXml = colorsXml.replace(
-                  "</resources>",
-                  '    <color name="ic_launcher_background">#FFFFFF</color>\n</resources>'
-                );
-                fs.writeFileSync(colorsPath, colorsXml);
-              }
-            }
-
-            console.log('✅ Custom app icon processing completed successfully!');
+            console.log('Custom app icon processing completed successfully!');
           } catch (error) {
-            console.error('❌ Icon processing failed:', error.message);
+            console.error('Icon processing failed:', error.message);
             process.exit(1);
           }
         }
@@ -359,12 +281,11 @@ jobs:
 
         # Run the icon processing script
         node process_icon.js
-
         
     - name: Make gradlew executable
       run: chmod +x android/gradlew
       
-    - name: Build Android App (optimized)
+    - name: Build Android App
       run: |
         echo "status=Building Android application..." >> $GITHUB_OUTPUT
         cd android
@@ -393,18 +314,8 @@ jobs:
         
         echo "Running: ./gradlew $GRADLE_TASK"
         
-        # Optimized Gradle settings for maximum speed
-        export GRADLE_OPTS="-Xmx4g -Dorg.gradle.daemon=true -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true -Dorg.gradle.caching=true"
-        
-        # Run the build with maximum optimizations (REMOVED --offline flag)
-        ./gradlew $GRADLE_TASK \
-          --build-cache \
-          --configure-on-demand \
-          --parallel \
-          --profile \
-          -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxMetaspaceSize=1g" \
-          -Dorg.gradle.parallel.threads=4 \
-          -Dkotlin.compiler.execution.strategy=in-process
+        # Run the build
+        ./gradlew $GRADLE_TASK
         
         echo "Build completed successfully!"
         echo "BUILT_PATH=$BUILT_PATH" >> $GITHUB_ENV
@@ -485,7 +396,7 @@ jobs:
         echo "APP_DOWNLOAD_URL=$APP_DOWNLOAD_URL" >> $GITHUB_ENV
         echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
         
-        echo "✅ Successfully uploaded to S3: s3://${S3_BUCKET}/${S3_PREFIX}/"
+        echo "Successfully uploaded to S3: s3://${S3_BUCKET}/${S3_PREFIX}/"
         
     - name: Update build status
       if: always()
@@ -534,19 +445,10 @@ jobs:
         echo "status=Cleaning up and deleting repository..." >> $GITHUB_OUTPUT
         
         # The repository will be deleted by the calling API after this workflow completes
-        # This step is just for logging
         echo "Repository cleanup will be handled by the API caller"
         
         if [ "${{ job.status }}" = "success" ]; then
-          echo "✅ Build completed successfully!"
-          echo "App: ${{ github.event.inputs.app_name }}"
-          echo "Build ID: ${{ github.event.inputs.build_id }}"
-          echo "Type: ${{ github.event.inputs.build_type }} ${{ github.event.inputs.output_type }}"
-          if [ "$HAS_CUSTOM_ICON" = "true" ]; then
-            echo "Custom app icon: Applied successfully"
-          fi
-          echo "Files uploaded to S3 successfully"
+          echo "Build completed successfully!"
         else
-          echo "❌ Build failed!"
-          echo "Check the logs above for error details."
+          echo "Build failed!"
         fi
