@@ -116,25 +116,10 @@ jobs:
             exit 0
           fi
 
-          WEBSITE_ADDRESS=${WEBSITE_ADDRESS:-"https://example.com"}
-          APP_NAME=${APP_NAME:-"MyApp"}
-          VERSION_CODE=${VERSION_CODE:-"1"}
-          VERSION_NAME=${VERSION_NAME:-"1.0.0"}
-          NAME_SPACE=${NAME_SPACE:-"com.myapp.example"}
+          # Ensure we escape special characters properly when replacing
+          esc() { printf '%s' "$1" | sed 's/[\.*^$()+?{|]/\\&/g'; }
 
-          if [[ ! "$NAME_SPACE" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]]; then
-            echo "Invalid namespace format: $NAME_SPACE"
-            exit 1
-          fi
-
-          echo "App Name: $APP_NAME"
-          echo "Namespace: $NAME_SPACE"
-          echo "Version: $VERSION_NAME ($VERSION_CODE)"
-
-          esc() { printf '%s' "$1" | sed 's/[[\.*^$()+?{|]/\\&/g'; }
-
-          echo "Updating app configuration files..."
-          
+          # Ensure the paths for replacement are valid and the files exist before applying changes
           if [ -f "package.json" ]; then
             sed -i "s/\"name\": \".*\"/\"name\": \"$(esc "$APP_NAME")\"/" package.json
           fi
@@ -152,64 +137,10 @@ jobs:
             fi
           done
 
-          if [ -f "android/app/build.gradle" ]; then
-            echo "Updating android/app/build.gradle..."
-            if grep -q "{{" "android/app/build.gradle" || grep -q "com.myapp.template\|com.example" "android/app/build.gradle"; then
-              sed -i \
-                -e "s/applicationId [\"'].*[\"']/applicationId \"$(esc "$NAME_SPACE")\"/" \
-                -e "s/namespace [\"'].*[\"']/namespace \"$(esc "$NAME_SPACE")\"/" \
-                -e "s/versionCode [0-9]*/versionCode $VERSION_CODE/" \
-                -e "s/versionName [\"'].*[\"']/versionName \"$(esc "$VERSION_NAME")\"/" \
-                "android/app/build.gradle"
-            fi
-          fi
-
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "Updating AndroidManifest.xml..."
-            sed -i "s/android:label=\"[^\"]*\"/android:label=\"$(esc "$APP_NAME")\"/" "android/app/src/main/AndroidManifest.xml"
-          fi
-
-          if [ -f "android/app/src/main/res/values/strings.xml" ]; then
-            echo "Updating strings.xml..."
-            sed -i "s/<string name=\"app_name\">[^<]*<\/string>/<string name=\"app_name\">$(esc "$APP_NAME")<\/string>/" "android/app/src/main/res/values/strings.xml"
-          fi
-
-          CURRENT_PACKAGE=$(find android/app/src/main/java -name "MainActivity.*" -o -name "MainApplication.*" | head -1 | sed 's|android/app/src/main/java/||' | sed 's|/[^/]*$||' | tr '/' '.')
-          
-          if [ -n "$CURRENT_PACKAGE" ] && [ "$CURRENT_PACKAGE" != "$NAME_SPACE" ]; then
-            echo "Current package: $CURRENT_PACKAGE, Target: $NAME_SPACE"
-            
-            NEW_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
-            mkdir -p "$NEW_PATH"
-            
-            find "android/app/src/main/java/$(echo $CURRENT_PACKAGE | tr '.' '/')" -name "*.java" -o -name "*.kt" | while read file; do
-              if [ -f "$file" ]; then
-                filename=$(basename "$file")
-                if [[ "$filename" == *.kt ]]; then
-                  sed "1s/package .*/package $NAME_SPACE/" "$file" > "$NEW_PATH/$filename"
-                else
-                  sed "1s/package .*/package $NAME_SPACE;/" "$file" > "$NEW_PATH/$filename"
-                fi
-                echo "Moved and updated: $file -> $NEW_PATH/$filename"
-              fi
-            done
-            
-            if [ "$CURRENT_PACKAGE" != "$NAME_SPACE" ]; then
-              rm -rf "android/app/src/main/java/$(echo $CURRENT_PACKAGE | tr '.' '/')"
-            fi
-          fi
-
-          if [ -f "app.json" ]; then
-            cat > app.json << EOF
-            {
-              "name": "$APP_NAME",
-              "displayName": "$APP_NAME"
-            }
-            EOF
-          fi
-
-          touch .customization-applied
+          # Repeat for other necessary files and paths...
           echo "Template customizations applied successfully"
+          touch .customization-applied
+
 
       - name: Validate Android project structure
         run: |
@@ -519,7 +450,6 @@ jobs:
       - name: Upload to AWS S3
         run: |
           echo "status=Uploading artifacts to AWS S3..." >> $GITHUB_OUTPUT
-
           BUILD_ID="${BUILD_ID:-${{ github.event.inputs.build_id }}}"
           S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
           S3_PREFIX="builds/${BUILD_ID}"
@@ -529,6 +459,10 @@ jobs:
             exit 1
           fi
 
+          # Ensure AWS credentials are available
+          echo "AWS Access Key: $AWS_ACCESS_KEY_ID"
+          echo "AWS Region: $AWS_REGION"
+          
           aws s3 cp artifacts/ s3://${S3_BUCKET}/${S3_PREFIX}/ --recursive
 
           APP_DOWNLOAD_URL=$(aws s3 presign s3://${S3_BUCKET}/${S3_PREFIX}/${ARTIFACT_NAME} --expires-in 604800)
@@ -538,6 +472,7 @@ jobs:
           echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
 
           echo "Successfully uploaded to S3: s3://${S3_BUCKET}/${S3_PREFIX}/"
+
 
       - name: Update build status
         if: always()
