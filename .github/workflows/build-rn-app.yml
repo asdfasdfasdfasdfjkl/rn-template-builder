@@ -229,6 +229,26 @@ jobs:
           fi
           echo "MainApplication found: $MAIN_APPLICATION"
           
+          # Check if build.gradle has proper configuration
+          if [ -f "android/app/build.gradle" ]; then
+            echo "Validating build.gradle configuration..."
+            if ! grep -q "applicationId" "android/app/build.gradle"; then
+              echo "Error: applicationId not found in build.gradle!"
+              exit 1
+            fi
+            echo "build.gradle validation passed"
+          fi
+          
+          # Check AndroidManifest.xml
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            echo "Validating AndroidManifest.xml..."
+            if ! grep -q "android.intent.category.LAUNCHER" "android/app/src/main/AndroidManifest.xml"; then
+              echo "Error: LAUNCHER category not found in AndroidManifest.xml!"
+              exit 1
+            fi
+            echo "AndroidManifest.xml validation passed"
+          fi
+          
           PACKAGE_FROM_PATH=$(echo "$MAIN_ACTIVITY" | sed 's|android/app/src/main/java/||' | sed 's|/[^/]*$||' | tr '/' '.')
           PACKAGE_FROM_FILE=$(head -1 "$MAIN_ACTIVITY" | grep -o 'package [^;]*' | sed 's/package *//' | sed 's/;//')
           
@@ -239,7 +259,7 @@ jobs:
             echo "Warning: Package mismatch detected but continuing..."
           fi
           
-          echo "Project structure validation completed"
+          echo "Project structure validation completed successfully"
 
       - name: Install Sharp for icon processing
         if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
