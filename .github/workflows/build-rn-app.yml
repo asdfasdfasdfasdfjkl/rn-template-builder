@@ -193,60 +193,63 @@ jobs:
         run: |
           echo "Processing custom app icon..."
           node << 'EOF'
-          const sharp = require('sharp');
-          const fs = require('fs');
-          const path = require('path');
-          
-          // Get app icon from environment
-          const appIcon = process.env.APP_ICON;
-          
-          if (!appIcon || appIcon === 'null') {
-            console.log('No app icon provided, skipping processing');
-            process.exit(0);
-          }
-          
-          try {
-            // Extract base64 data
-            const base64Data = appIcon.replace(/^data:image\/\w+;base64,/, '');
-            const buffer = Buffer.from(base64Data, 'base64');
+          (async () => {  // Added the async function wrapper
+            const sharp = require('sharp');
+            const fs = require('fs');
+            const path = require('path');
             
-            // Android icon sizes and paths
-            const androidSizes = [
-              { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png' },
-              { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png' },
-              { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher.png' },
-              { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher.png' },
-              { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher.png' },
-              { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png' },
-              { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png' },
-              { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png' },
-              { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png' },
-              { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png' }
-            ];
+            // Get app icon from environment
+            const appIcon = process.env.APP_ICON;
             
-            // Process each icon size
-            const promises = androidSizes.map(async (config) => {
-              const dir = path.dirname(config.path);
-              if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-              }
+            if (!appIcon || appIcon === 'null') {
+              console.log('No app icon provided, skipping processing');
+              process.exit(0);
+            }
+            
+            try {
+              // Extract base64 data
+              const base64Data = appIcon.replace(/^data:image\/\w+;base64,/, '');
+              const buffer = Buffer.from(base64Data, 'base64');
               
-              await sharp(buffer)
-                .resize(config.size, config.size)
-                .png()
-                .toFile(config.path);
+              // Android icon sizes and paths
+              const androidSizes = [
+                { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png' },
+                { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png' },
+                { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher.png' },
+                { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher.png' },
+                { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher.png' },
+                { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png' },
+                { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png' },
+                { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png' },
+                { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png' },
+                { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png' }
+              ];
+              
+              // Process each icon size
+              const promises = androidSizes.map(async (config) => {
+                const dir = path.dirname(config.path);
+                if (!fs.existsSync(dir)) {
+                  fs.mkdirSync(dir, { recursive: true });
+                }
                 
-              console.log(`Generated ${config.path}`);
-            });
-            
-            await Promise.all(promises);
-            console.log('All app icons generated successfully');
-            
-          } catch (error) {
-            console.error('Error processing app icon:', error);
-            process.exit(1);
-          }
+                await sharp(buffer)
+                  .resize(config.size, config.size)
+                  .png()
+                  .toFile(config.path);
+                  
+                console.log(`Generated ${config.path}`);
+              });
+              
+              await Promise.all(promises);  // Now this works since we're inside an async function
+              console.log('All app icons generated successfully');
+              
+            } catch (error) {
+              console.error('Error processing app icon:', error);
+              process.exit(1);
+            }
+          })();  // Call the async function immediately
           EOF
+
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
