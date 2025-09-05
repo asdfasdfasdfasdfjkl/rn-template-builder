@@ -98,6 +98,36 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-android-build-
 
+    # ✅ Cache node_modules
+    - name: Cache node_modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            **/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+    # ✅ Cache Gradle
+    - name: Cache Gradle
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    # ✅ Cache Android NDK
+    - name: Cache Android NDK
+      uses: actions/cache@v3
+      with:
+        path: /usr/local/lib/android/sdk/ndk
+        key: ${{ runner.os }}-ndk-25.2.9519653 # set your NDK version
+        restore-keys: |
+          ${{ runner.os }}-ndk-
+
     - name: Read build configuration
       id: config
       run: |
@@ -224,156 +254,112 @@ jobs:
       if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
       run: |
         echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
-        
-        # Skip if icons already exist
-        if [ -f "android/app/src/main/res/mipmap-mdpi/ic_launcher.png" ]; then
-          echo "Icons already exist, skipping generation..."
-          exit 0
-        fi
-        
+
         # Create optimized Node.js script to process icon
         cat > process_icon.js << 'EOF'
         const sharp = require('sharp');
         const fs = require('fs');
         const path = require('path');
-        const { promisify } = require('util');
-        const exec = promisify(require('child_process').exec);
-        
+
         async function generateIcons() {
           try {
             const iconData = process.env.APP_ICON;
-            
             if (!iconData || iconData === 'null') {
               console.log('No app icon provided');
               return;
             }
-            
+
             console.log('Processing app icon...');
-            
+
+            // decode base64
             let iconBuffer;
-            
-            // Validate and extract base64 data
             if (iconData.startsWith('data:image/')) {
               const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
-              if (!matches) {
-                throw new Error('Invalid data URL format');
-              }
-              
+              if (!matches) throw new Error('Invalid data URL format');
               const [, imageType, base64Data] = matches;
-              console.log(`Image type: ${imageType}`);
-              
-              if (!['png', 'jpeg', 'jpg', 'gif', 'webp'].includes(imageType.toLowerCase())) {
+              if (!['png','jpeg','jpg','gif','webp'].includes(imageType.toLowerCase())) {
                 throw new Error(`Unsupported image type: ${imageType}`);
               }
-              
               iconBuffer = Buffer.from(base64Data, 'base64');
-              console.log(`Icon buffer size: ${iconBuffer.length} bytes`);
             } else {
               throw new Error('App icon must be a base64 data URL');
             }
-            
-            // Verify the image can be processed
+
             const metadata = await sharp(iconBuffer).metadata();
-            console.log(`Original image: ${metadata.width}x${metadata.height} ${metadata.format}`);
-            
             if (metadata.width < 48 || metadata.height < 48) {
               throw new Error('Icon too small. Minimum size is 48x48 pixels');
             }
-            
+
             const androidResPath = 'android/app/src/main/res';
-            
-            // Define only essential icon sizes to reduce processing time
+
+            // essential icon sizes
             const iconConfigs = [
-              // Mipmap folders (modern Android) - only essential sizes
               { size: 48, folder: 'mipmap-mdpi', filename: 'ic_launcher.png' },
               { size: 72, folder: 'mipmap-hdpi', filename: 'ic_launcher.png' },
               { size: 96, folder: 'mipmap-xhdpi', filename: 'ic_launcher.png' },
               { size: 144, folder: 'mipmap-xxhdpi', filename: 'ic_launcher.png' },
               { size: 192, folder: 'mipmap-xxxhdpi', filename: 'ic_launcher.png' },
             ];
-            
-            // Create all directories first
-            const uniqueFolders = [...new Set(iconConfigs.map(config => config.folder))];
-            for (const folder of uniqueFolders) {
-              const folderPath = path.join(androidResPath, folder);
-              if (!fs.existsSync(folderPath)) {
-                fs.mkdirSync(folderPath, { recursive: true });
-                console.log(`Created folder: ${folderPath}`);
-              }
-            }
-            
-            // Process icons sequentially to avoid memory issues but faster processing
-            console.log(`Generating ${iconConfigs.length} essential icon variants...`);
-            
+
             for (const { size, folder, filename } of iconConfigs) {
-              try {
-                const outputPath = path.join(androidResPath, folder, filename);
-                
-                await sharp(iconBuffer)
-                  .resize(size, size, {
-                    fit: 'cover',
-                    position: 'center'
-                  })
-                  .png({
-                    quality: 85,
-                    compressionLevel: 6
-                  })
-                  .toFile(outputPath);
-                
-                console.log(`✓ Generated ${folder}/${filename} (${size}x${size})`);
-              } catch (error) {
-                console.error(`✗ Failed to generate ${folder}/${filename}:`, error.message);
+              const folderPath = path.join(androidResPath, folder);
+              if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+
+              const outputPath = path.join(folderPath, filename);
+              await sharp(iconBuffer)
+                .resize(size, size, { fit: 'cover', position: 'center' })
+                .png({ quality: 85, compressionLevel: 6 })
+                .toFile(outputPath);
+
+              console.log(`✓ Generated ${folder}/${filename} (${size}x${size})`);
+            }
+
+            // adaptive icons
+            const mipmapV26Path = path.join(androidResPath, "mipmap-anydpi-v26");
+            if (!fs.existsSync(mipmapV26Path)) {
+              fs.mkdirSync(mipmapV26Path, { recursive: true });
+            }
+
+            const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
+            <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+                <background android:drawable="@color/ic_launcher_background"/>
+                <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+            </adaptive-icon>
+            `;
+
+            fs.writeFileSync(path.join(mipmapV26Path, "ic_launcher.xml"), adaptiveIconXml);
+            fs.writeFileSync(path.join(mipmapV26Path, "ic_launcher_round.xml"), adaptiveIconXml);
+
+            await sharp(iconBuffer)
+              .resize(108, 108)
+              .png()
+              .toFile(path.join(mipmapV26Path, "ic_launcher_foreground.png"));
+
+            const colorsPath = path.join(androidResPath, "values/colors.xml");
+            if (fs.existsSync(colorsPath)) {
+              let colorsXml = fs.readFileSync(colorsPath, "utf8");
+              if (!colorsXml.includes("ic_launcher_background")) {
+                colorsXml = colorsXml.replace(
+                  "</resources>",
+                  '    <color name="ic_launcher_background">#FFFFFF</color>\n</resources>'
+                );
+                fs.writeFileSync(colorsPath, colorsXml);
               }
             }
-            
-            // Copy essential icons to other folders to avoid generating all variants
-            await copyIconsToOtherFolders(androidResPath);
-            
+
             console.log('✅ Custom app icon processing completed successfully!');
-            
           } catch (error) {
             console.error('❌ Icon processing failed:', error.message);
             process.exit(1);
           }
         }
-        
-        async function copyIconsToOtherFolders(androidResPath) {
-          try {
-            // Copy mipmap icons to drawable folders for compatibility
-            const copyOperations = [
-              { src: 'mipmap-mdpi/ic_launcher.png', dst: 'drawable-mdpi/ic_launcher.png' },
-              { src: 'mipmap-hdpi/ic_launcher.png', dst: 'drawable-hdpi/ic_launcher.png' },
-              { src: 'mipmap-xhdpi/ic_launcher.png', dst: 'drawable-xhdpi/ic_launcher.png' },
-              { src: 'mipmap-xxhdpi/ic_launcher.png', dst: 'drawable-xxhdpi/ic_launcher.png' },
-              { src: 'mipmap-xxxhdpi/ic_launcher.png', dst: 'drawable-xxxhdpi/ic_launcher.png' },
-            ];
-            
-            for (const { src, dst } of copyOperations) {
-              const srcPath = path.join(androidResPath, src);
-              const dstPath = path.join(androidResPath, dst);
-              const dstDir = path.dirname(dstPath);
-              
-              if (fs.existsSync(srcPath) && !fs.existsSync(dstPath)) {
-                if (!fs.existsSync(dstDir)) {
-                  fs.mkdirSync(dstDir, { recursive: true });
-                }
-                fs.copyFileSync(srcPath, dstPath);
-                console.log(`✓ Copied ${src} to ${dst}`);
-              }
-            }
-          } catch (error) {
-            console.warn('Warning: Failed to copy icons:', error.message);
-          }
-        }
-        
-        generateIcons().catch((error) => {
-          console.error('Fatal error in icon generation:', error);
-          process.exit(1);
-        });
+
+        generateIcons();
         EOF
-        
+
         # Run the icon processing script
         node process_icon.js
+
         
     - name: Make gradlew executable
       run: chmod +x android/gradlew
