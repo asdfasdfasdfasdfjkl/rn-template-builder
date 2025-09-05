@@ -246,20 +246,9 @@ jobs:
           echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
           npm install sharp --no-save
 
-      - name: Process custom app icon
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
-        run: |
-          echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
-          # ... rest of your process_icon.js code
-
-      - name: Verify Custom Icons
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
-        run: |
-          echo "Verifying custom icons were generated..."
-          # ... rest of your verification code
 
       - name: Process custom app icon
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
         run: |
           echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
 
@@ -345,52 +334,55 @@ jobs:
                   <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
               </adaptive-icon>`;
 
-                  fs.writeFileSync(path.join(adaptivePath, 'ic_launcher.xml'), adaptiveIconXml);
-                  fs.writeFileSync(path.join(adaptivePath, 'ic_launcher_round.xml'), adaptiveIconXml);
+              fs.writeFileSync(path.join(adaptivePath, 'ic_launcher.xml'), adaptiveIconXml);
+              fs.writeFileSync(path.join(adaptivePath, 'ic_launcher_round.xml'), adaptiveIconXml);
 
-                  // Generate foreground icons (108dp for adaptive icons)
-                  const foregroundConfigs = [
-                    { size: 108, folder: 'mipmap-mdpi' },
-                    { size: 162, folder: 'mipmap-hdpi' },
-                    { size: 216, folder: 'mipmap-xhdpi' },
-                    { size: 324, folder: 'mipmap-xxhdpi' },
-                    { size: 432, folder: 'mipmap-xxxhdpi' },
-                  ];
+              // Generate foreground icons (108dp for adaptive icons)
+              const foregroundConfigs = [
+                { size: 108, folder: 'mipmap-mdpi' },
+                { size: 162, folder: 'mipmap-hdpi' },
+                { size: 216, folder: 'mipmap-xhdpi' },
+                { size: 324, folder: 'mipmap-xxhdpi' },
+                { size: 432, folder: 'mipmap-xxxhdpi' },
+              ];
 
-                  for (const { size, folder } of foregroundConfigs) {
-                    const folderPath = path.join(androidResPath, folder);
-                    await sharp(iconBuffer)
-                      .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-                      .png()
-                      .toFile(path.join(folderPath, 'ic_launcher_foreground.png'));
-                  }
+              for (const { size, folder } of foregroundConfigs) {
+                const folderPath = path.join(androidResPath, folder);
+                await sharp(iconBuffer)
+                  .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                  .png()
+                  .toFile(path.join(folderPath, 'ic_launcher_foreground.png'));
+              }
 
-                  // Create background color resource
-                  const valuesPath = path.join(androidResPath, 'values');
-                  if (!fs.existsSync(valuesPath)) fs.mkdirSync(valuesPath, { recursive: true });
-                  
-                  const colorsXml = `<?xml version="1.0" encoding="utf-8"?>
+              // Create background color resource
+              const valuesPath = path.join(androidResPath, 'values');
+              if (!fs.existsSync(valuesPath)) fs.mkdirSync(valuesPath, { recursive: true });
+              
+              const colorsXml = `<?xml version="1.0" encoding="utf-8"?>
               <resources>
                   <color name="ic_launcher_background">#FFFFFF</color>
               </resources>`;
-                  
-                  fs.writeFileSync(path.join(valuesPath, 'colors.xml'), colorsXml);
+              
+              fs.writeFileSync(path.join(valuesPath, 'colors.xml'), colorsXml);
 
-                  console.log('Adaptive icon setup completed successfully!');
-                } catch (error) {
-                  console.error('Icon processing failed:', error.message);
-                  process.exit(1);
-                }
-              }
+              console.log('Adaptive icon setup completed successfully!');
+            } catch (error) {
+              console.error('Icon processing failed:', error.message);
+              process.exit(1);
+            }
+          }
 
-              generateIcons();
+          generateIcons();
+          EOF
+
+          # Actually run the icon processing script
+          node process_icon.js
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-
       - name: Verify Custom Icons
-        if: env.HAS_CUSTOM_ICON == 'true'
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
         run: |
           echo "Verifying custom icons were generated..."
           
