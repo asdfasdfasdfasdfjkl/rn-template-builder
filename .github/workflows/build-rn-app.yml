@@ -60,7 +60,6 @@ jobs:
           if [ -f "build-config.json" ]; then
             echo "Build config found, reading values..."
             
-            # Extract values with proper defaults and validation
             WEBSITE_ADDRESS=$(jq -r '.website_address // ""' build-config.json)
             APP_NAME=$(jq -r '.app_name // ""' build-config.json)
             VERSION_CODE=$(jq -r '.version_code // .versionCode // "1"' build-config.json)
@@ -72,13 +71,11 @@ jobs:
             BUILD_ID=$(jq -r '.buildId // ""' build-config.json)
             HAS_CUSTOM_ICON=$(jq -r '.has_custom_icon // "false"' build-config.json)
             
-            # Validate required fields
             if [ -z "$APP_NAME" ] || [ -z "$NAME_SPACE" ]; then
               echo "Error: Missing required fields in build-config.json"
               exit 1
             fi
             
-            # Set environment variables
             echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
             echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
             echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
@@ -93,7 +90,6 @@ jobs:
             echo "Configuration loaded:"
             echo "APP_NAME=$APP_NAME"
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON"
-            echo "APP_ICON present: $(if [ -n "$APP_ICON" ] && [ "$APP_ICON" != "null" ]; then echo "yes"; else echo "no"; fi)"
             
           else
             echo "No build config found, using workflow inputs"
@@ -105,7 +101,6 @@ jobs:
             echo "APP_ICON=" >> $GITHUB_ENV
           fi
 
-          
       - name: Install dependencies
         run: |
           echo "status=Installing npm dependencies..." >> $GITHUB_OUTPUT
@@ -116,20 +111,17 @@ jobs:
         run: |
           echo "status=Applying template customizations..." >> $GITHUB_OUTPUT
 
-          # Only apply customizations if they haven't been applied before
           if [ -f ".customization-applied" ]; then
             echo "Customizations already applied, skipping..."
             exit 0
           fi
 
-          # Defaults with validation
           WEBSITE_ADDRESS=${WEBSITE_ADDRESS:-"https://example.com"}
           APP_NAME=${APP_NAME:-"MyApp"}
           VERSION_CODE=${VERSION_CODE:-"1"}
           VERSION_NAME=${VERSION_NAME:-"1.0.0"}
           NAME_SPACE=${NAME_SPACE:-"com.myapp.example"}
 
-          # Validate namespace format
           if [[ ! "$NAME_SPACE" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]]; then
             echo "Invalid namespace format: $NAME_SPACE"
             exit 1
@@ -139,19 +131,14 @@ jobs:
           echo "Namespace: $NAME_SPACE"
           echo "Version: $VERSION_NAME ($VERSION_CODE)"
 
-          # Escape function for sed
           esc() { printf '%s' "$1" | sed 's/[[\.*^$()+?{|]/\\&/g'; }
 
           echo "Updating app configuration files..."
           
-          # Update package.json
           if [ -f "package.json" ]; then
             sed -i "s/\"name\": \".*\"/\"name\": \"$(esc "$APP_NAME")\"/" package.json
           fi
 
-          # SAFER APPROACH: Only replace specific template placeholders, not existing values
-          
-          # 1. First, handle template placeholder replacements in all files
           find . -type f \( -name "*.gradle" -o -name "*.xml" -o -name "*.json" -o -name "*.js" -o -name "*.ts" -o -name "*.kt" -o -name "*.java" \) | while read file; do
             if [ -f "$file" ] && grep -q "{{" "$file" 2>/dev/null; then
               echo "Processing template placeholders in: $file"
@@ -165,10 +152,8 @@ jobs:
             fi
           done
 
-          # 2. Handle specific Android configuration files more carefully
           if [ -f "android/app/build.gradle" ]; then
             echo "Updating android/app/build.gradle..."
-            # Only update if it contains template placeholders or default values
             if grep -q "{{" "android/app/build.gradle" || grep -q "com.myapp.template\|com.example" "android/app/build.gradle"; then
               sed -i \
                 -e "s/applicationId [\"'].*[\"']/applicationId \"$(esc "$NAME_SPACE")\"/" \
@@ -179,61 +164,50 @@ jobs:
             fi
           fi
 
-          # 3. Handle AndroidManifest.xml more carefully
           if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
             echo "Updating AndroidManifest.xml..."
             sed -i "s/android:label=\"[^\"]*\"/android:label=\"$(esc "$APP_NAME")\"/" "android/app/src/main/AndroidManifest.xml"
           fi
 
-          # 4. Update strings.xml if it exists
           if [ -f "android/app/src/main/res/values/strings.xml" ]; then
             echo "Updating strings.xml..."
             sed -i "s/<string name=\"app_name\">[^<]*<\/string>/<string name=\"app_name\">$(esc "$APP_NAME")<\/string>/" "android/app/src/main/res/values/strings.xml"
           fi
 
-          # 5. Handle MainActivity and MainApplication - BE MORE CAREFUL
           CURRENT_PACKAGE=$(find android/app/src/main/java -name "MainActivity.*" -o -name "MainApplication.*" | head -1 | sed 's|android/app/src/main/java/||' | sed 's|/[^/]*$||' | tr '/' '.')
           
           if [ -n "$CURRENT_PACKAGE" ] && [ "$CURRENT_PACKAGE" != "$NAME_SPACE" ]; then
             echo "Current package: $CURRENT_PACKAGE, Target: $NAME_SPACE"
             
-            # Create new directory structure
             NEW_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
             mkdir -p "$NEW_PATH"
             
-            # Move and update files
             find "android/app/src/main/java/$(echo $CURRENT_PACKAGE | tr '.' '/')" -name "*.java" -o -name "*.kt" | while read file; do
               if [ -f "$file" ]; then
                 filename=$(basename "$file")
-                # Update package declaration based on file type
                 if [[ "$filename" == *.kt ]]; then
-                  # Kotlin files don't use semicolon
                   sed "1s/package .*/package $NAME_SPACE/" "$file" > "$NEW_PATH/$filename"
                 else
-                  # Java files use semicolon
                   sed "1s/package .*/package $NAME_SPACE;/" "$file" > "$NEW_PATH/$filename"
                 fi
                 echo "Moved and updated: $file -> $NEW_PATH/$filename"
               fi
             done
             
-            # Remove old directory if different
             if [ "$CURRENT_PACKAGE" != "$NAME_SPACE" ]; then
               rm -rf "android/app/src/main/java/$(echo $CURRENT_PACKAGE | tr '.' '/')"
             fi
           fi
 
-          # 6. Update app.json
           if [ -f "app.json" ]; then
             cat > app.json << EOF
-{
-  "name": "$APP_NAME",
-  "displayName": "$APP_NAME"
-}
-EOF
+            {
+              "name": "$APP_NAME",
+              "displayName": "$APP_NAME"
+            }
+            EOF
           fi
 
-          # Mark customizations as applied
           touch .customization-applied
           echo "Template customizations applied successfully"
 
@@ -241,7 +215,6 @@ EOF
         run: |
           echo "status=Validating Android project structure..." >> $GITHUB_OUTPUT
           
-          # Check if MainActivity exists
           MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.*" | head -1)
           if [ -z "$MAIN_ACTIVITY" ]; then
             echo "Error: MainActivity not found!"
@@ -249,7 +222,6 @@ EOF
           fi
           echo "MainActivity found: $MAIN_ACTIVITY"
           
-          # Check if MainApplication exists
           MAIN_APPLICATION=$(find android/app/src/main/java -name "MainApplication.*" | head -1)
           if [ -z "$MAIN_APPLICATION" ]; then
             echo "Error: MainApplication not found!"
@@ -257,7 +229,6 @@ EOF
           fi
           echo "MainApplication found: $MAIN_APPLICATION"
           
-          # Verify package declaration matches directory structure
           PACKAGE_FROM_PATH=$(echo "$MAIN_ACTIVITY" | sed 's|android/app/src/main/java/||' | sed 's|/[^/]*$||' | tr '/' '.')
           PACKAGE_FROM_FILE=$(head -1 "$MAIN_ACTIVITY" | grep -o 'package [^;]*' | sed 's/package *//' | sed 's/;//')
           
@@ -281,7 +252,6 @@ EOF
         run: |
           echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
 
-          # Create Node.js script to process icon
           cat > process_icon.js << 'EOF'
           const sharp = require('sharp');
           const fs = require('fs');
@@ -297,7 +267,6 @@ EOF
 
               console.log('Processing app icon with adaptive icon support...');
 
-              // Decode base64
               let iconBuffer;
               if (iconData.startsWith('data:image/')) {
                 const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
@@ -313,7 +282,6 @@ EOF
 
               const androidResPath = 'android/app/src/main/res';
 
-              // Create res directories if they don't exist
               const resDirs = [
                 'mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 
                 'mipmap-xxhdpi', 'mipmap-xxxhdpi',
@@ -327,7 +295,6 @@ EOF
                 }
               });
 
-              // Standard launcher icons
               const iconConfigs = [
                 { size: 48, folder: 'mipmap-mdpi' },
                 { size: 72, folder: 'mipmap-hdpi' },
@@ -336,17 +303,14 @@ EOF
                 { size: 192, folder: 'mipmap-xxxhdpi' },
               ];
 
-              // Generate both standard and round icons
               for (const { size, folder } of iconConfigs) {
                 const folderPath = path.join(androidResPath, folder);
 
-                // Standard icon
                 await sharp(iconBuffer)
                   .resize(size, size, { fit: 'cover', position: 'center' })
                   .png()
                   .toFile(path.join(folderPath, 'ic_launcher.png'));
 
-                // Round icon (cropped to circle)
                 const roundIconSvg = `<svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="white"/></svg>`;
                 await sharp(iconBuffer)
                   .resize(size, size, { fit: 'cover', position: 'center' })
@@ -360,18 +324,16 @@ EOF
                 console.log(`Generated ${folder} icons (${size}x${size})`);
               }
 
-              // Create adaptive icon XML files
               const adaptivePath = path.join(androidResPath, 'mipmap-anydpi-v26');
               const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-</adaptive-icon>`;
+              <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+                  <background android:drawable="@color/ic_launcher_background"/>
+                  <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+              </adaptive-icon>`;
 
               fs.writeFileSync(path.join(adaptivePath, 'ic_launcher.xml'), adaptiveIconXml);
               fs.writeFileSync(path.join(adaptivePath, 'ic_launcher_round.xml'), adaptiveIconXml);
 
-              // Generate foreground icons for adaptive icons
               const foregroundConfigs = [
                 { size: 108, folder: 'mipmap-mdpi' },
                 { size: 162, folder: 'mipmap-hdpi' },
@@ -388,14 +350,13 @@ EOF
                   .toFile(path.join(folderPath, 'ic_launcher_foreground.png'));
               }
 
-              // Create background color resource
               const valuesPath = path.join(androidResPath, 'values');
               if (!fs.existsSync(valuesPath)) fs.mkdirSync(valuesPath, { recursive: true });
               
               const colorsXml = `<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
-</resources>`;
+              <resources>
+                  <color name="ic_launcher_background">#FFFFFF</color>
+              </resources>`;
               
               fs.writeFileSync(path.join(valuesPath, 'colors.xml'), colorsXml);
 
@@ -409,7 +370,6 @@ EOF
           generateIcons();
           EOF
 
-          # Run the icon processing script
           node process_icon.js
 
       - name: Make gradlew executable
@@ -419,14 +379,9 @@ EOF
         run: |
           echo "status=Cleaning previous builds..." >> $GITHUB_OUTPUT
           cd android
-          
-          # Clean Gradle build directories
           ./gradlew clean --no-daemon --console=plain
-          
-          # Remove build directories to ensure fresh build
           rm -rf app/build/
           rm -rf build/
-          
           echo "Previous builds cleaned successfully"
 
       - name: Build Android App
@@ -445,7 +400,6 @@ EOF
           echo "  - App Name: ${APP_NAME}"
           echo "  - Namespace: ${NAME_SPACE}"
 
-          # Set Gradle arguments based on build type and output type
           if [ "$BUILD_TYPE" = "release" ]; then
             if [ "$OUTPUT_TYPE" = "aab" ]; then
               GRADLE_TASK="bundleRelease"
@@ -461,29 +415,21 @@ EOF
 
           echo "Running: ./gradlew $GRADLE_TASK"
 
-          # Run the build with proper error handling
           if ! ./gradlew $GRADLE_TASK --no-daemon --console=plain --stacktrace; then
             echo "Build failed! Checking for common issues..."
-            
-            # Print build logs for debugging
             echo "=== BUILD FAILURE ANALYSIS ==="
             if [ -f "app/build/outputs/logs/gradle-build.log" ]; then
               echo "Build log:"
               cat "app/build/outputs/logs/gradle-build.log"
             fi
-            
             echo "=== GRADLE BUILD DIRECTORY CONTENTS ==="
             find app/build -name "*.log" -exec echo "File: {}" \; -exec cat {} \;
-            
             exit 1
           fi
 
-          # Verify the build output
           if [ ! -f "$BUILT_PATH" ]; then
             echo "Primary build path not found: $BUILT_PATH"
             echo "Checking alternative paths..."
-            
-            # Try to find the actual built file
             FOUND_FILE=$(find app/build/outputs -name "*.apk" -o -name "*.aab" | head -1)
             if [ -n "$FOUND_FILE" ]; then
               BUILT_PATH="$FOUND_FILE"
@@ -507,10 +453,8 @@ EOF
           BUILD_TYPE="${BUILD_TYPE:-${{ github.event.inputs.build_type }}}"
           OUTPUT_TYPE="${OUTPUT_TYPE:-${{ github.event.inputs.output_type }}}"
 
-          # Create artifacts directory
           mkdir -p artifacts
 
-          # Copy built app
           BUILT_FILE="android/${BUILT_PATH}"
           ARTIFACT_NAME="app-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
 
@@ -524,23 +468,22 @@ EOF
             exit 1
           fi
 
-          # Create build info
           cat > artifacts/build-info.json << EOF
-{
-  "buildId": "$BUILD_ID",
-  "appName": "$APP_NAME", 
-  "buildType": "$BUILD_TYPE",
-  "outputType": "$OUTPUT_TYPE",
-  "platform": "android",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "versionCode": "${VERSION_CODE:-1}",
-  "versionName": "${VERSION_NAME:-1.0.0}",
-  "namespace": "${NAME_SPACE:-com.example.app}",
-  "fileSize": "$(stat -c%s "artifacts/$ARTIFACT_NAME")",
-  "fileName": "$ARTIFACT_NAME",
-  "hasCustomIcon": "${HAS_CUSTOM_ICON:-false}"
-}
-EOF
+          {
+            "buildId": "$BUILD_ID",
+            "appName": "$APP_NAME", 
+            "buildType": "$BUILD_TYPE",
+            "outputType": "$OUTPUT_TYPE",
+            "platform": "android",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "versionCode": "${VERSION_CODE:-1}",
+            "versionName": "${VERSION_NAME:-1.0.0}",
+            "namespace": "${NAME_SPACE:-com.example.app}",
+            "fileSize": "$(stat -c%s "artifacts/$ARTIFACT_NAME")",
+            "fileName": "$ARTIFACT_NAME",
+            "hasCustomIcon": "${HAS_CUSTOM_ICON:-false}"
+          }
+          EOF
 
           echo "Build artifacts prepared successfully"
           ls -la artifacts/
@@ -566,10 +509,8 @@ EOF
             exit 1
           fi
 
-          # Upload all artifacts to S3
           aws s3 cp artifacts/ s3://${S3_BUCKET}/${S3_PREFIX}/ --recursive
 
-          # Generate presigned URLs (valid for 7 days)
           APP_DOWNLOAD_URL=$(aws s3 presign s3://${S3_BUCKET}/${S3_PREFIX}/${ARTIFACT_NAME} --expires-in 604800)
           INFO_DOWNLOAD_URL=$(aws s3 presign s3://${S3_BUCKET}/${S3_PREFIX}/build-info.json --expires-in 604800)
 
@@ -598,22 +539,20 @@ EOF
             MESSAGE="Build failed - check logs for details"
           fi
 
-          # Create status file
           cat > build-status.json << EOF
-{
-  "buildId": "$BUILD_ID",
-  "status": "$STATUS",
-  "conclusion": "$CONCLUSION", 
-  "message": "$MESSAGE",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "downloadUrl": "${APP_DOWNLOAD_URL:-null}",
-  "infoUrl": "${INFO_DOWNLOAD_URL:-null}",
-  "repoUrl": "${{ github.server_url }}/${{ github.repository }}",
-  "hasCustomIcon": "${HAS_CUSTOM_ICON:-false}"
-}
-EOF
+          {
+            "buildId": "$BUILD_ID",
+            "status": "$STATUS",
+            "conclusion": "$CONCLUSION", 
+            "message": "$MESSAGE",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "downloadUrl": "${APP_DOWNLOAD_URL:-null}",
+            "infoUrl": "${INFO_DOWNLOAD_URL:-null}",
+            "repoUrl": "${{ github.server_url }}/${{ github.repository }}",
+            "hasCustomIcon": "${HAS_CUSTOM_ICON:-false}"
+          }
+          EOF
 
-          # Upload status to S3
           if [ -n "$S3_BUCKET" ]; then
             aws s3 cp build-status.json s3://${S3_BUCKET}/status/${BUILD_ID}.json
             echo "Status uploaded to S3"
