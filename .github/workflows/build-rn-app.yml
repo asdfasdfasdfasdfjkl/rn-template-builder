@@ -115,9 +115,8 @@ jobs:
             local value=$3
             
             if [ -f "$file" ]; then
-              # Escape special characters in the replacement value
-              escaped_value=$(printf '%s\n' "$value" | sed 's/[[\.*^$()+?{|]/\\&/g')
-              sed -i "s|$placeholder|$escaped_value|g" "$file"
+              # No escaping of special characters, just replace as-is
+              sed -i "s|$placeholder|$value|g" "$file"
               echo "✓ Replaced $placeholder in $file"
               
               # Verify replacement
@@ -181,6 +180,7 @@ jobs:
           fi
           
           echo "Template customizations applied successfully"
+
 
       - name: Install Sharp for icon processing
         if: env.HAS_CUSTOM_ICON == 'true'
