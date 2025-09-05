@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           echo "Applying template customizations..."
-          sed -i "s|{{website_address}}|${{ env.WEBSITE_ADDRESS }}|g" app.tsx
+          sed -i "s|{{website_address}}|${{ env.WEBSITE_ADDRESS }}|g" App.tsx
           sed -i "s|{{app_name}}|${{ env.APP_NAME }}|g" app.json
           sed -i "s|{{version_code}}|${{ env.VERSION_CODE }}|g" android/app/build.gradle
           sed -i "s|{{version_name}}|${{ env.VERSION_NAME }}|g" android/app/build.gradle
