@@ -89,20 +89,27 @@ jobs:
       - name: Read build configuration
         id: config
         run: |
+          echo "Checking for build-config.json..."
           if [ -f "build-config.json" ]; then
-            echo "status=Reading build configuration..." >> $GITHUB_OUTPUT
+            echo "Build config found, reading values..."
             
-            # Extract values from build-config.json
-            WEBSITE_ADDRESS=$(jq -r '.website_address' build-config.json)
-            APP_NAME=$(jq -r '.app_name' build-config.json)
-            VERSION_CODE=$(jq -r '.version_code' build-config.json)
-            VERSION_NAME=$(jq -r '.version_name' build-config.json)
-            NAME_SPACE=$(jq -r '.name_space' build-config.json)
-            BUILD_TYPE=$(jq -r '.buildType' build-config.json)
-            OUTPUT_TYPE=$(jq -r '.outputType' build-config.json)
-            APP_ICON=$(jq -r '.app_icon' build-config.json)
-            BUILD_ID=$(jq -r '.buildId' build-config.json)
-            HAS_CUSTOM_ICON=$(jq -r '.has_custom_icon' build-config.json)
+            # Extract values with proper defaults and validation
+            WEBSITE_ADDRESS=$(jq -r '.website_address // ""' build-config.json)
+            APP_NAME=$(jq -r '.app_name // ""' build-config.json)
+            VERSION_CODE=$(jq -r '.version_code // .versionCode // "1"' build-config.json)
+            VERSION_NAME=$(jq -r '.version_name // .versionName // "1.0.0"' build-config.json)
+            NAME_SPACE=$(jq -r '.name_space // .nameSpace // ""' build-config.json)
+            BUILD_TYPE=$(jq -r '.buildType // "release"' build-config.json)
+            OUTPUT_TYPE=$(jq -r '.outputType // "apk"' build-config.json)
+            APP_ICON=$(jq -r '.app_icon // ""' build-config.json)
+            BUILD_ID=$(jq -r '.buildId // ""' build-config.json)
+            HAS_CUSTOM_ICON=$(jq -r '.has_custom_icon // "false"' build-config.json)
+            
+            # Validate required fields
+            if [ -z "$APP_NAME" ] || [ -z "$NAME_SPACE" ]; then
+              echo "Error: Missing required fields in build-config.json"
+              exit 1
+            fi
             
             # Set environment variables
             echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
@@ -116,23 +123,36 @@ jobs:
             echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
             
-            echo "Configuration loaded successfully"
-            echo "Custom icon provided: $HAS_CUSTOM_ICON"
+            echo "Configuration loaded:"
+            echo "APP_NAME=$APP_NAME"
+            echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON"
+            echo "APP_ICON present: $(if [ -n "$APP_ICON" ] && [ "$APP_ICON" != "null" ]; then echo "yes"; else echo "no"; fi)"
+            
           else
-            echo "status=No build config found, using workflow inputs" >> $GITHUB_OUTPUT
+            echo "No build config found, using workflow inputs"
             echo "APP_NAME=${{ github.event.inputs.app_name }}" >> $GITHUB_ENV
             echo "BUILD_TYPE=${{ github.event.inputs.build_type }}" >> $GITHUB_ENV
             echo "OUTPUT_TYPE=${{ github.event.inputs.output_type }}" >> $GITHUB_ENV
             echo "BUILD_ID=${{ github.event.inputs.build_id }}" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=false" >> $GITHUB_ENV
           fi
+          
 
+      - name: Debug icon configuration
+        run: |
+          echo "=== DEBUG ICON CONFIG ==="
+          echo "HAS_CUSTOM_ICON: $HAS_CUSTOM_ICON"
+          echo "APP_ICON length: $(echo -n "$APP_ICON" | wc -c)"
+          echo "APP_ICON starts with: $(echo -n "$APP_ICON" | cut -c 1-50)"
+          echo "APP_ICON is null: $(if [ "$APP_ICON" = "null" ]; then echo "yes"; else echo "no"; fi)"
+          echo "APP_ICON is empty: $(if [ -z "$APP_ICON" ]; then echo "yes"; else echo "no"; fi)"
+
+          
       - name: Install dependencies
         run: |
           echo "status=Installing npm dependencies..." >> $GITHUB_OUTPUT
           npm ci --no-audit --no-fund --prefer-offline
 
-      # Replace the "Apply template customizations" step with this:
       - name: Apply template customizations
         shell: bash
         run: |
@@ -172,14 +192,28 @@ jobs:
             sed -i "s/\"name\": \".*\"/\"name\": \"$(esc "$APP_NAME")\"/" package.json
           fi
 
-          # Update Android specific files
+          # Update Android specific files - FIXED FOR TEMPLATE PLACEHOLDERS
           find android -name "*.gradle" -o -name "*.xml" -o -name "*.kt" -o -name "*.java" | while read file; do
             if [ -f "$file" ]; then
+              # Replace template placeholders instead of existing values
               sed -i \
                 -e "s/applicationId \".*\"/applicationId \"$(esc "$NAME_SPACE")\"/" \
-                -e "s/versionCode [0-9]*/versionCode $VERSION_CODE/" \
-                -e "s/versionName \".*\"/versionName \"$(esc "$VERSION_NAME")\"/" \
+                -e "s/namespace \".*\"/namespace \"$(esc "$NAME_SPACE")\"/" \
+                -e "s/{{version_code}}/$VERSION_CODE/g" \
+                -e "s/{{version_name}}/$(esc "$VERSION_NAME")/g" \
                 -e "s/android:label=\".*\"/android:label=\"$(esc "$APP_NAME")\"/" \
+                "$file"
+            fi
+          done
+
+          # Also update any other files that might contain template placeholders
+          find . -name "*.json" -o -name "*.js" -o -name "*.ts" | while read file; do
+            if [ -f "$file" ]; then
+              sed -i \
+                -e "s/{{app_name}}/$(esc "$APP_NAME")/g" \
+                -e "s/{{version_code}}/$VERSION_CODE/g" \
+                -e "s/{{version_name}}/$(esc "$VERSION_NAME")/g" \
+                -e "s/{{name_space}}/$(esc "$NAME_SPACE")/g" \
                 "$file"
             fi
           done
@@ -207,10 +241,22 @@ jobs:
               echo "Template customizations applied successfully"
 
       - name: Install Sharp for icon processing
-        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
         run: |
           echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
           npm install sharp --no-save
+
+      - name: Process custom app icon
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
+        run: |
+          echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
+          # ... rest of your process_icon.js code
+
+      - name: Verify Custom Icons
+        if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null' && env.APP_ICON != 'undefined'
+        run: |
+          echo "Verifying custom icons were generated..."
+          # ... rest of your verification code
 
       - name: Process custom app icon
         if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
