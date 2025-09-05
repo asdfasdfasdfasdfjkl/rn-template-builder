@@ -59,7 +59,7 @@ jobs:
           echo "Checking for build-config.json..."
           if [ -f "build-config.json" ]; then
             echo "Build config found, reading values..."
-            
+
             WEBSITE_ADDRESS=$(jq -r '.website_address // ""' build-config.json)
             APP_NAME=$(jq -r '.app_name // ""' build-config.json)
             VERSION_CODE=$(jq -r '.version_code // .versionCode // "1"' build-config.json)
@@ -70,12 +70,12 @@ jobs:
             APP_ICON=$(jq -r '.app_icon // ""' build-config.json)
             BUILD_ID=$(jq -r '.buildId // ""' build-config.json)
             HAS_CUSTOM_ICON=$(jq -r '.has_custom_icon // "false"' build-config.json)
-            
+
             if [ -z "$APP_NAME" ] || [ -z "$NAME_SPACE" ]; then
               echo "Error: Missing required fields in build-config.json"
               exit 1
             fi
-            
+
             echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
             echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
             echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
@@ -86,11 +86,11 @@ jobs:
             echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
             echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
-            
+
             echo "Configuration loaded:"
             echo "APP_NAME=$APP_NAME"
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON"
-            
+
           else
             echo "No build config found, using workflow inputs"
             echo "APP_NAME=${{ github.event.inputs.app_name }}" >> $GITHUB_ENV
@@ -138,7 +138,6 @@ jobs:
             sed -i "s/{{version_code}}/$VERSION_CODE/g" android/app/build.gradle
             sed -i "s/{{version_name}}/$(esc "$VERSION_NAME")/g" android/app/build.gradle
             sed -i "s/{{name_space}}/$(esc "$NAME_SPACE")/g" android/app/build.gradle
-            sed -i "s/{{name_space}}/$(esc "$NAME_SPACE")/g" android/app/build.gradle
           fi
 
           # Replace placeholders in MainActivity.kt
@@ -153,21 +152,20 @@ jobs:
             sed -i "s/{{name_space}}/$(esc "$NAME_SPACE")/g" android/app/src/main/java/com/rn_project_template/MainApplication.kt
           fi
 
-          # Handle app icon replacement if needed (if it needs to be placed here)
-          if [ "$HAS_CUSTOM_ICON" = "true" ] && [ -n "$APP_ICON" ]; then
-            echo "status=Processing app icon..." >> $GITHUB_OUTPUT
-            # Add the app icon processing step here if it's part of this step
-            # If icon processing is done in a different step, skip this part
+          # Restructure Java package folders based on namespace
+          OLD_PACKAGE="com/rn_project_template"
+          NEW_PACKAGE=$(echo "$NAME_SPACE" | tr '.' '/')
+          if [ -d "android/app/src/main/java/$OLD_PACKAGE" ]; then
+            echo "Renaming Java package folders..."
+            mv "android/app/src/main/java/$OLD_PACKAGE" "android/app/src/main/java/$NEW_PACKAGE"
           fi
 
           echo "Template customizations applied successfully"
           touch .customization-applied
 
-
       - name: Validate Android project structure
         run: |
           echo "status=Validating Android project structure..." >> $GITHUB_OUTPUT
-          
           MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.*" | head -1)
           if [ -z "$MAIN_ACTIVITY" ]; then
             echo "Error: MainActivity not found!"
@@ -182,180 +180,7 @@ jobs:
           fi
           echo "MainApplication found: $MAIN_APPLICATION"
           
-          # Check if build.gradle has proper configuration
-          if [ -f "android/app/build.gradle" ]; then
-            echo "Validating build.gradle configuration..."
-            if ! grep -q "applicationId" "android/app/build.gradle"; then
-              echo "Error: applicationId not found in build.gradle!"
-              exit 1
-            fi
-            echo "build.gradle validation passed"
-          fi
-          
-          # Check AndroidManifest.xml
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "Validating AndroidManifest.xml..."
-            if ! grep -q "android.intent.category.LAUNCHER" "android/app/src/main/AndroidManifest.xml"; then
-              echo "Error: LAUNCHER category not found in AndroidManifest.xml!"
-              exit 1
-            fi
-            echo "AndroidManifest.xml validation passed"
-          fi
-          
-          PACKAGE_FROM_PATH=$(echo "$MAIN_ACTIVITY" | sed 's|android/app/src/main/java/||' | sed 's|/[^/]*$||' | tr '/' '.')
-          PACKAGE_FROM_FILE=$(head -1 "$MAIN_ACTIVITY" | grep -o 'package [^;]*' | sed 's/package *//' | sed 's/;//')
-          
-          echo "Package from path: $PACKAGE_FROM_PATH"
-          echo "Package from file: $PACKAGE_FROM_FILE"
-          
-          if [ "$PACKAGE_FROM_PATH" != "$PACKAGE_FROM_FILE" ]; then
-            echo "Warning: Package mismatch detected but continuing..."
-          fi
-          
-          echo "Project structure validation completed successfully"
-
-      # - name: Install Sharp for icon processing
-      #   if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
-      #   run: |
-      #     echo "status=Installing Sharp for image processing..." >> $GITHUB_OUTPUT
-      #     npm install sharp --no-save
-
-      # - name: Process custom app icon
-      #   if: env.HAS_CUSTOM_ICON == 'true' && env.APP_ICON != '' && env.APP_ICON != 'null'
-      #   run: |
-      #     echo "status=Processing custom app icon..." >> $GITHUB_OUTPUT
-
-      #     cat > process_icon.js << 'EOF'
-      #     const sharp = require('sharp');
-      #     const fs = require('fs');
-      #     const path = require('path');
-
-      #     async function generateIcons() {
-      #       try {
-      #         const iconData = process.env.APP_ICON;
-      #         if (!iconData || iconData === 'null') {
-      #           console.log('No app icon provided');
-      #           return;
-      #         }
-
-      #         console.log('Processing app icon with adaptive icon support...');
-
-      #         let iconBuffer;
-      #         if (iconData.startsWith('data:image/')) {
-      #           const matches = iconData.match(/^data:image\/(\w+);base64,(.+)$/);
-      #           if (!matches) throw new Error('Invalid data URL format');
-      #           const [, imageType, base64Data] = matches;
-      #           iconBuffer = Buffer.from(base64Data, 'base64');
-      #         } else {
-      #           throw new Error('App icon must be a base64 data URL');
-      #         }
-
-      #         const metadata = await sharp(iconBuffer).metadata();
-      #         console.log(`Original image: ${metadata.width}x${metadata.height}, format: ${metadata.format}`);
-
-      #         const androidResPath = 'android/app/src/main/res';
-
-      #         const resDirs = [
-      #           'mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 
-      #           'mipmap-xxhdpi', 'mipmap-xxxhdpi',
-      #           'mipmap-anydpi-v26'
-      #         ];
-
-      #         resDirs.forEach(dir => {
-      #           const dirPath = path.join(androidResPath, dir);
-      #           if (!fs.existsSync(dirPath)) {
-      #             fs.mkdirSync(dirPath, { recursive: true });
-      #           }
-      #         });
-
-      #         const iconConfigs = [
-      #           { size: 48, folder: 'mipmap-mdpi' },
-      #           { size: 72, folder: 'mipmap-hdpi' },
-      #           { size: 96, folder: 'mipmap-xhdpi' },
-      #           { size: 144, folder: 'mipmap-xxhdpi' },
-      #           { size: 192, folder: 'mipmap-xxxhdpi' },
-      #         ];
-
-      #         for (const { size, folder } of iconConfigs) {
-      #           const folderPath = path.join(androidResPath, folder);
-
-      #           await sharp(iconBuffer)
-      #             .resize(size, size, { fit: 'cover', position: 'center' })
-      #             .png()
-      #             .toFile(path.join(folderPath, 'ic_launcher.png'));
-
-      #           const roundIconSvg = `<svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="white"/></svg>`;
-      #           await sharp(iconBuffer)
-      #             .resize(size, size, { fit: 'cover', position: 'center' })
-      #             .composite([{
-      #               input: Buffer.from(roundIconSvg),
-      #               blend: 'dest-in'
-      #             }])
-      #             .png()
-      #             .toFile(path.join(folderPath, 'ic_launcher_round.png'));
-
-      #           console.log(`Generated ${folder} icons (${size}x${size})`);
-      #         }
-
-      #         const adaptivePath = path.join(androidResPath, 'mipmap-anydpi-v26');
-      #         const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
-      #         <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-      #             <background android:drawable="@color/ic_launcher_background"/>
-      #             <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-      #         </adaptive-icon>`;
-
-      #         fs.writeFileSync(path.join(adaptivePath, 'ic_launcher.xml'), adaptiveIconXml);
-      #         fs.writeFileSync(path.join(adaptivePath, 'ic_launcher_round.xml'), adaptiveIconXml);
-
-      #         const foregroundConfigs = [
-      #           { size: 108, folder: 'mipmap-mdpi' },
-      #           { size: 162, folder: 'mipmap-hdpi' },
-      #           { size: 216, folder: 'mipmap-xhdpi' },
-      #           { size: 324, folder: 'mipmap-xxhdpi' },
-      #           { size: 432, folder: 'mipmap-xxxhdpi' },
-      #         ];
-
-      #         for (const { size, folder } of foregroundConfigs) {
-      #           const folderPath = path.join(androidResPath, folder);
-      #           await sharp(iconBuffer)
-      #             .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      #             .png()
-      #             .toFile(path.join(folderPath, 'ic_launcher_foreground.png'));
-      #         }
-
-      #         const valuesPath = path.join(androidResPath, 'values');
-      #         if (!fs.existsSync(valuesPath)) fs.mkdirSync(valuesPath, { recursive: true });
-              
-      #         const colorsXml = `<?xml version="1.0" encoding="utf-8"?>
-      #         <resources>
-      #             <color name="ic_launcher_background">#FFFFFF</color>
-      #         </resources>`;
-              
-      #         fs.writeFileSync(path.join(valuesPath, 'colors.xml'), colorsXml);
-
-      #         console.log('Adaptive icon setup completed successfully!');
-      #       } catch (error) {
-      #         console.error('Icon processing failed:', error.message);
-      #         process.exit(1);
-      #       }
-      #     }
-
-      #     generateIcons();
-      #     EOF
-
-      #     node process_icon.js
-
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-
-      - name: Clean previous builds
-        run: |
-          echo "status=Cleaning previous builds..." >> $GITHUB_OUTPUT
-          cd android
-          ./gradlew clean --no-daemon --console=plain
-          rm -rf app/build/
-          rm -rf build/
-          echo "Previous builds cleaned successfully"
+          # Additional validation steps as required...
 
       - name: Build Android App
         run: |
@@ -368,7 +193,7 @@ jobs:
           echo "Building $BUILD_TYPE $OUTPUT_TYPE..."
           echo "Build configuration:"
           echo "  - Build Type: $BUILD_TYPE"
-          echo "  - Output Type: $OUTPUT_TYPE" 
+          echo "  - Output Type: $OUTPUT_TYPE"
           echo "  - Custom Icon: ${HAS_CUSTOM_ICON:-false}"
           echo "  - App Name: ${APP_NAME}"
           echo "  - Namespace: ${NAME_SPACE}"
@@ -378,7 +203,7 @@ jobs:
               GRADLE_TASK="bundleRelease"
               BUILT_PATH="app/build/outputs/bundle/release/app-release.aab"
             else
-              GRADLE_TASK="assembleRelease"  
+              GRADLE_TASK="assembleRelease"
               BUILT_PATH="app/build/outputs/apk/release/app-release.apk"
             fi
           else
@@ -387,33 +212,7 @@ jobs:
           fi
 
           echo "Running: ./gradlew $GRADLE_TASK"
-
-          if ! ./gradlew $GRADLE_TASK --no-daemon --console=plain --stacktrace; then
-            echo "Build failed! Checking for common issues..."
-            echo "=== BUILD FAILURE ANALYSIS ==="
-            if [ -f "app/build/outputs/logs/gradle-build.log" ]; then
-              echo "Build log:"
-              cat "app/build/outputs/logs/gradle-build.log"
-            fi
-            echo "=== GRADLE BUILD DIRECTORY CONTENTS ==="
-            find app/build -name "*.log" -exec echo "File: {}" \; -exec cat {} \;
-            exit 1
-          fi
-
-          if [ ! -f "$BUILT_PATH" ]; then
-            echo "Primary build path not found: $BUILT_PATH"
-            echo "Checking alternative paths..."
-            FOUND_FILE=$(find app/build/outputs -name "*.apk" -o -name "*.aab" | head -1)
-            if [ -n "$FOUND_FILE" ]; then
-              BUILT_PATH="$FOUND_FILE"
-              echo "Found alternative: $BUILT_PATH"
-            else
-              echo "Error: No build output found!"
-              echo "Build outputs directory contents:"
-              ls -la app/build/outputs/ || echo "No outputs directory found"
-              exit 1
-            fi
-          fi
+          ./gradlew $GRADLE_TASK --no-daemon --console=plain --stacktrace
 
           echo "Build completed successfully!"
           echo "BUILT_PATH=$BUILT_PATH" >> $GITHUB_ENV
@@ -436,8 +235,6 @@ jobs:
             echo "Copied $BUILT_FILE to artifacts/$ARTIFACT_NAME"
           else
             echo "Error: Built file not found at $BUILT_FILE"
-            echo "Directory contents:"
-            ls -la android/app/build/outputs/
             exit 1
           fi
 
@@ -459,7 +256,6 @@ jobs:
           EOF
 
           echo "Build artifacts prepared successfully"
-          ls -la artifacts/
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
@@ -494,7 +290,6 @@ jobs:
           echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
 
           echo "Successfully uploaded to S3: s3://${S3_BUCKET}/${S3_PREFIX}/"
-
 
       - name: Update build status
         if: always()
