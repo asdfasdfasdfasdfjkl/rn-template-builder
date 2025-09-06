@@ -156,14 +156,46 @@ jobs:
           OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
           NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
           
+          echo "OLD_JAVA_PATH: $OLD_JAVA_PATH"
+          echo "NEW_JAVA_PATH: $NEW_JAVA_PATH"
+          echo "NAME_SPACE: $NAME_SPACE"
+          
           if [ -d "$OLD_JAVA_PATH" ]; then
             echo "Moving from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
             
+            # Debug: Show current directory structure
+            echo "Current directory structure:"
+            find android/app/src/main/java -type d | head -10
+            
             # Create the full target directory path
+            echo "Creating directory: $NEW_JAVA_PATH"
             mkdir -p "$NEW_JAVA_PATH"
             
+            # Verify directory was created
+            if [ -d "$NEW_JAVA_PATH" ]; then
+              echo "✓ Target directory created successfully"
+            else
+              echo "✗ Failed to create target directory"
+              exit 1
+            fi
+            
+            # List files to be copied
+            echo "Files to copy:"
+            ls -la "$OLD_JAVA_PATH/"
+            
             # Copy files to the new location
+            echo "Copying files..."
             cp -r "$OLD_JAVA_PATH"/* "$NEW_JAVA_PATH/"
+            
+            # Verify copy was successful
+            if [ $? -eq 0 ]; then
+              echo "✓ Files copied successfully"
+              echo "Files in new location:"
+              ls -la "$NEW_JAVA_PATH/"
+            else
+              echo "✗ Copy failed"
+              exit 1
+            fi
             
             # Remove the old directory
             rm -rf "$OLD_JAVA_PATH"
@@ -175,8 +207,12 @@ jobs:
             fi
             
             echo "✓ Java package restructured successfully"
+            echo "Final directory structure:"
+            find android/app/src/main/java -type d | head -10
           else
             echo "✗ Old Java path not found: $OLD_JAVA_PATH"
+            echo "Available directories:"
+            find android/app/src/main/java -type d 2>/dev/null || echo "No java directory found"
           fi
 
       - name: Fix cleartext traffic issue
