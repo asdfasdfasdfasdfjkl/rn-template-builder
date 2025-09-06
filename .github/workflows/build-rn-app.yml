@@ -158,8 +158,14 @@ jobs:
           
           if [ -d "$OLD_JAVA_PATH" ]; then
             echo "Moving from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
-            mkdir -p "$(dirname "$NEW_JAVA_PATH")"
+            
+            # Create the full target directory path
+            mkdir -p "$NEW_JAVA_PATH"
+            
+            # Copy files to the new location
             cp -r "$OLD_JAVA_PATH"/* "$NEW_JAVA_PATH/"
+            
+            # Remove the old directory
             rm -rf "$OLD_JAVA_PATH"
             
             # Clean up empty com directory if needed
