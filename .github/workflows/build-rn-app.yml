@@ -179,6 +179,24 @@ jobs:
             echo "✗ Old Java path not found: $OLD_JAVA_PATH"
           fi
 
+      - name: Fix cleartext traffic issue
+        run: |
+          echo "Adding cleartext traffic permission to AndroidManifest.xml..."
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          
+          if [ -f "$MANIFEST_PATH" ]; then
+            # Check if usesCleartextTraffic is already present
+            if ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
+              # Add the cleartext traffic permission to the application tag
+              perl -i -pe 's/(<application[^>]*)/\1\n        android:usesCleartextTraffic="true"/' "$MANIFEST_PATH"
+              echo "✓ Added cleartext traffic permission to AndroidManifest.xml"
+            else
+              echo "✓ Cleartext traffic permission already present"
+            fi
+          else
+            echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
+          fi
+
       - name: Install Sharp for icon processing
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
