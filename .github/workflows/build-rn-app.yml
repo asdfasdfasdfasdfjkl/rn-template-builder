@@ -110,25 +110,24 @@ jobs:
           
           # Function to safely replace placeholders
           safe_replace() {
-          local file=$1
-          local placeholder=$2
-          local value=$3
-          
-          if [ -f "$file" ]; then
-              # No escaping of special characters, just replace as-is
-              # Use a placeholder that ensures no special regex characters are treated
-              sed -i "s|$placeholder|$value|g" "$file"
-              echo "✓ Replaced $placeholder in $file"
-              
-              # Verify replacement
-              if grep -q "$placeholder" "$file"; then
-                  echo "⚠ Warning: $placeholder still found in $file after replacement"
-              fi
-          else
-              echo "✗ File not found: $file"
-          fi
-      }
-
+            local file=$1
+            local placeholder=$2
+            local value=$3
+            
+            if [ -f "$file" ]; then
+                # No escaping of special characters, just replace as-is
+                # Use a placeholder that ensures no special regex characters are treated
+                sed -i "s|$placeholder|$value|g" "$file"
+                echo "✓ Replaced $placeholder in $file"
+                
+                # Verify replacement
+                if grep -q "$placeholder" "$file"; then
+                    echo "⚠ Warning: $placeholder still found in $file after replacement"
+                fi
+            else
+                echo "✗ File not found: $file"
+            fi
+          }
           
           # Replace placeholders in App.tsx
           safe_replace "App.tsx" "{{website_address}}" "${{ env.WEBSITE_ADDRESS }}"
@@ -183,7 +182,6 @@ jobs:
           
           echo "Template customizations applied successfully"
 
-
       - name: Install Sharp for icon processing
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
@@ -195,7 +193,7 @@ jobs:
         run: |
           echo "Processing custom app icon..."
           node << 'EOF'
-          (async () => {  // Added the async function wrapper
+          (async () => {
             const sharp = require('sharp');
             const fs = require('fs');
             const path = require('path');
@@ -242,16 +240,15 @@ jobs:
                 console.log(`Generated ${config.path}`);
               });
               
-              await Promise.all(promises);  // Now this works since we're inside an async function
+              await Promise.all(promises);
               console.log('All app icons generated successfully');
               
             } catch (error) {
               console.error('Error processing app icon:', error);
               process.exit(1);
             }
-          })();  // Call the async function immediately
+          })();
           EOF
-
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
