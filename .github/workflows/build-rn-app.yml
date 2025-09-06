@@ -100,7 +100,7 @@ jobs:
       - name: Install dependencies
         run: |
           echo "Installing dependencies..."
-          npm ci --legacy-peer-deps
+          npm ci --legacy-peer-deps --no-audit --no-fund
           echo "Dependencies installed successfully"
 
       - name: Apply template customizations
@@ -108,79 +108,70 @@ jobs:
         run: |
           echo "Applying template customizations..."
           
-          # Function to safely replace placeholders
+          # Extract middle segment from namespace for settings.gradle and app.json
+          NAME_SPACE_PARTS=(${NAME_SPACE//./ })
+          if [ ${#NAME_SPACE_PARTS[@]} -ge 3 ]; then
+            MIDDLE_SEGMENT=${NAME_SPACE_PARTS[1]}
+          else
+            MIDDLE_SEGMENT=${NAME_SPACE_PARTS[-1]}
+          fi
+          
+          echo "Using middle segment: $MIDDLE_SEGMENT"
+          
+          # Function to safely replace content in files
           safe_replace() {
             local file=$1
-            local placeholder=$2
-            local value=$3
+            local find=$2
+            local replace=$3
             
             if [ -f "$file" ]; then
-                # No escaping of special characters, just replace as-is
-                # Use a placeholder that ensures no special regex characters are treated
-                sed -i "s|$placeholder|$value|g" "$file"
-                echo "✓ Replaced $placeholder in $file"
-                
-                # Verify replacement
-                if grep -q "$placeholder" "$file"; then
-                    echo "⚠ Warning: $placeholder still found in $file after replacement"
-                fi
+              # Use perl for more reliable replacement
+              perl -i -pe "s/\Q$find\E/$replace/g" "$file"
+              echo "✓ Updated $file: $find -> $replace"
             else
-                echo "✗ File not found: $file"
+              echo "✗ File not found: $file"
             fi
           }
           
-          # Replace placeholders in App.tsx
-          safe_replace "App.tsx" "{{website_address}}" "${{ env.WEBSITE_ADDRESS }}"
-          
-          # Replace placeholders in app.json (app_name appears twice)
-          safe_replace "app.json" "{{app_name}}" "${{ env.APP_NAME }}"
-          
-          # Replace placeholders in Android build.gradle
-          safe_replace "android/app/build.gradle" "{{version_code}}" "${{ env.VERSION_CODE }}"
-          safe_replace "android/app/build.gradle" "{{version_name}}" "${{ env.VERSION_NAME }}"
-          safe_replace "android/app/build.gradle" "{{name_space}}" "${{ env.NAME_SPACE }}"
-          
-          # Replace namespace in MainActivity.kt
-          safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "{{name_space}}" "${{ env.NAME_SPACE }}"
-          
-          # Replace namespace in MainApplication.kt
-          safe_replace "android/app/src/main/java/com/rn_project_template/MainApplication.kt" "{{name_space}}" "${{ env.NAME_SPACE }}"
-          
-          # Handle namespace directory structure
-          OLD_NAMESPACE_DIR="android/app/src/main/java/com/rn_project_template"
-          if [ -d "$OLD_NAMESPACE_DIR" ]; then
-            # Convert namespace to directory structure
-            NEW_NAMESPACE_DIR="android/app/src/main/java/$(echo '${{ env.NAME_SPACE }}' | tr '.' '/')"
-            
-            if [ "$OLD_NAMESPACE_DIR" != "$NEW_NAMESPACE_DIR" ]; then
-              echo "Creating new namespace directory: $NEW_NAMESPACE_DIR"
-              mkdir -p "$(dirname "$NEW_NAMESPACE_DIR")"
-              
-              if [ ! -d "$NEW_NAMESPACE_DIR" ]; then
-                mv "$OLD_NAMESPACE_DIR" "$NEW_NAMESPACE_DIR"
-                echo "✓ Moved Java files to new namespace directory"
-              else
-                cp -r "$OLD_NAMESPACE_DIR"/* "$NEW_NAMESPACE_DIR"/
-                echo "✓ Copied Java files to new namespace directory"
-              fi
-            fi
-          fi
-          
-          # Update AndroidManifest.xml
-          MANIFEST_FILE="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST_FILE" ]; then
-            safe_replace "$MANIFEST_FILE" "com.rn_project_template" "${{ env.NAME_SPACE }}"
-            safe_replace "$MANIFEST_FILE" "{{name_space}}" "${{ env.NAME_SPACE }}"
-          fi
-          
-          # Update strings.xml if it exists
-          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
-          if [ -f "$STRINGS_FILE" ]; then
-            safe_replace "$STRINGS_FILE" "{{app_name}}" "${{ env.APP_NAME }}"
-            safe_replace "$STRINGS_FILE" "rn_project_template" "${{ env.APP_NAME }}"
-          fi
+          # Apply all replacements matching the working local build
+          safe_replace "android/settings.gradle" "rn_project_template" "$MIDDLE_SEGMENT"
+          safe_replace "app.json" "rn_project_template" "$MIDDLE_SEGMENT"
+          safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" '"rn_project_template"' "\"$MIDDLE_SEGMENT\""
+          safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "{{name_space}}" "$NAME_SPACE"
+          safe_replace "app.tsx" "{{website_address}}" "$WEBSITE_ADDRESS"
+          safe_replace "app.json" "{{app_name}}" "$APP_NAME"
+          safe_replace "android/app/build.gradle" "{{version_code}}" "$VERSION_CODE"
+          safe_replace "android/app/src/main/res/values/strings.xml" "rn_project_template" "$APP_NAME"
+          safe_replace "android/app/build.gradle" "{{version_name}}" "$VERSION_NAME"
+          safe_replace "android/app/build.gradle" "com.rn_project_template" "$NAME_SPACE"
+          safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "com.rn_project_template" "$NAME_SPACE"
+          safe_replace "android/app/src/main/java/com/rn_project_template/MainApplication.kt" "com.rn_project_template" "$NAME_SPACE"
+          safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
           
           echo "Template customizations applied successfully"
+
+      - name: Restructure Java package
+        run: |
+          echo "Restructuring Java package..."
+          OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
+          NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
+          
+          if [ -d "$OLD_JAVA_PATH" ]; then
+            echo "Moving from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
+            mkdir -p "$(dirname "$NEW_JAVA_PATH")"
+            cp -r "$OLD_JAVA_PATH"/* "$NEW_JAVA_PATH/"
+            rm -rf "$OLD_JAVA_PATH"
+            
+            # Clean up empty com directory if needed
+            COM_PATH="android/app/src/main/java/com"
+            if [ -d "$COM_PATH" ] && [ -z "$(ls -A $COM_PATH)" ]; then
+              rm -rf "$COM_PATH"
+            fi
+            
+            echo "✓ Java package restructured successfully"
+          else
+            echo "✗ Old Java path not found: $OLD_JAVA_PATH"
+          fi
 
       - name: Install Sharp for icon processing
         if: env.HAS_CUSTOM_ICON == 'true'
@@ -188,14 +179,14 @@ jobs:
           echo "Installing Sharp for icon processing..."
           npm install sharp --no-save
 
-      - name: Process custom app icon
+      - name: Process custom app icon (matching local build)
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
           echo "Processing custom app icon..."
           node << 'EOF'
           (async () => {
             const sharp = require('sharp');
-            const fs = require('fs');
+            const fs = require('fs-extra');
             const path = require('path');
             
             // Get app icon from environment
@@ -207,40 +198,64 @@ jobs:
             }
             
             try {
-              // Extract base64 data
-              const base64Data = appIcon.replace(/^data:image\/\w+;base64,/, '');
-              const buffer = Buffer.from(base64Data, 'base64');
+              let iconBuffer;
+              if (appIcon.startsWith('data:image/')) {
+                const base64Data = appIcon.replace(/^data:image\/\w+;base64,/, '');
+                iconBuffer = Buffer.from(base64Data, 'base64');
+              } else {
+                iconBuffer = await fs.readFile(appIcon);
+              }
               
-              // Android icon sizes and paths
-              const androidSizes = [
-                { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png' },
-                { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png' },
-                { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher.png' },
-                { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher.png' },
-                { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher.png' },
-                { size: 192, path: 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png' },
-                { size: 144, path: 'android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png' },
-                { size: 96, path: 'android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png' },
-                { size: 72, path: 'android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png' },
-                { size: 48, path: 'android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png' }
+              const androidResPath = 'android/app/src/main/res';
+              
+              // Generate drawable icons (matching local build)
+              const iconSizes = [
+                { size: 36, folder: 'drawable-ldpi' },
+                { size: 48, folder: 'drawable-mdpi' },
+                { size: 72, folder: 'drawable-hdpi' },
+                { size: 96, folder: 'drawable-xhdpi' },
+                { size: 144, folder: 'drawable-xxhdpi' },
+                { size: 192, folder: 'drawable-xxxhdpi' }
               ];
               
-              // Process each icon size
-              const promises = androidSizes.map(async (config) => {
-                const dir = path.dirname(config.path);
-                if (!fs.existsSync(dir)) {
-                  fs.mkdirSync(dir, { recursive: true });
-                }
+              for (const { size, folder } of iconSizes) {
+                const folderPath = path.join(androidResPath, folder);
+                await fs.ensureDir(folderPath);
                 
-                await sharp(buffer)
-                  .resize(config.size, config.size)
+                await sharp(iconBuffer)
+                  .resize(size, size)
                   .png()
-                  .toFile(config.path);
+                  .toFile(path.join(folderPath, 'ic_launcher.png'));
                   
-                console.log(`Generated ${config.path}`);
-              });
+                console.log(`Generated ${folder}/ic_launcher.png`);
+              }
               
-              await Promise.all(promises);
+              // Generate mipmap icons (matching local build)
+              const roundIconSizes = [
+                { size: 48, folder: 'mipmap-mdpi' },
+                { size: 72, folder: 'mipmap-hdpi' },
+                { size: 96, folder: 'mipmap-xhdpi' },
+                { size: 144, folder: 'mipmap-xxhdpi' },
+                { size: 192, folder: 'mipmap-xxxhdpi' }
+              ];
+              
+              for (const { size, folder } of roundIconSizes) {
+                const folderPath = path.join(androidResPath, folder);
+                await fs.ensureDir(folderPath);
+                
+                await sharp(iconBuffer)
+                  .resize(size, size)
+                  .png()
+                  .toFile(path.join(folderPath, 'ic_launcher.png'));
+                  
+                await sharp(iconBuffer)
+                  .resize(size, size)
+                  .png()
+                  .toFile(path.join(folderPath, 'ic_launcher_round.png'));
+                  
+                console.log(`Generated ${folder}/ic_launcher.png and ic_launcher_round.png`);
+              }
+              
               console.log('All app icons generated successfully');
               
             } catch (error) {
@@ -253,102 +268,133 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
+      - name: Validate Android environment
+        run: |
+          echo "Validating Android build environment..."
+          
+          # Check required files
+          required_files=(
+            "android/gradlew"
+            "android/app/build.gradle"
+            "android/build.gradle"
+          )
+          
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "✗ Required file not found: $file"
+              exit 1
+            else
+              echo "✓ Found: $file"
+            fi
+          done
+          
+          echo "Android environment validation completed"
+
       - name: Clean previous builds
         run: |
           cd android
-          ./gradlew clean
+          echo "Cleaning previous builds..."
+          ./gradlew clean --stacktrace
 
-      - name: Build Android App
+      - name: Build Android App (matching local build logic)
         run: |
           cd android
           echo "Building Android app..."
           echo "Build Type: ${{ env.BUILD_TYPE }}"
           echo "Output Type: ${{ env.OUTPUT_TYPE }}"
           
-          # Set build options
-          export ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a,armeabi-v7a
+          # Set environment variables matching local build
+          export GRADLE_OPTS="-Xmx2g -Dorg.gradle.daemon=false"
           
+          # Determine build arguments based on type and output
           if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
             if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
               echo "Building release AAB..."
-              ./gradlew bundleRelease --no-daemon --stacktrace
+              ./gradlew bundleRelease --stacktrace --info --no-daemon
             else
               echo "Building release APK..."
-              ./gradlew assembleRelease --no-daemon --stacktrace
+              ./gradlew assembleRelease --stacktrace --info --no-daemon
             fi
           else
-            if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
-              echo "Building debug AAB..."
-              ./gradlew bundleDebug --no-daemon --stacktrace
-            else
-              echo "Building debug APK..."
-              ./gradlew assembleDebug --no-daemon --stacktrace
-            fi
+            echo "Building debug APK..."
+            ./gradlew assembleDebug --stacktrace --info --no-daemon
           fi
 
-      - name: Verify build outputs
+      - name: Verify and copy build outputs
+        id: verify_outputs
         run: |
           echo "Verifying build outputs..."
-          find android/app/build/outputs -name "*.apk" -o -name "*.aab" | while read file; do
-            echo "Found: $file ($(du -h "$file" | cut -f1))"
-          done
-
-      - name: Prepare build artifacts
-        id: prepare_artifacts
-        run: |
-          echo "Preparing build artifacts..."
-          BUILD_ID="${{ env.BUILD_ID }}"
-          APP_NAME="${{ env.APP_NAME }}"
-          BUILD_TYPE="${{ env.BUILD_TYPE }}"
-          OUTPUT_TYPE="${{ env.OUTPUT_TYPE }}"
           
-          mkdir -p artifacts
-          
-          # Determine the path to the built file
-          if [ "$OUTPUT_TYPE" == "aab" ]; then
-            BUILT_FILE="android/app/build/outputs/bundle/${BUILD_TYPE}/app-${BUILD_TYPE}.aab"
+          # Determine expected build path based on build type and output type
+          if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
+            BUILT_APP_PATH="android/app/build/outputs/bundle/release/app-release.aab"
           else
-            BUILT_FILE="android/app/build/outputs/apk/${BUILD_TYPE}/app-${BUILD_TYPE}.apk"
+            if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
+              BUILT_APP_PATH="android/app/build/outputs/apk/release/app-release.apk"
+            else
+              BUILT_APP_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+            fi
           fi
           
-          # Clean app name for filename
-          CLEAN_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
-          ARTIFACT_NAME="${CLEAN_APP_NAME}-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
+          echo "Looking for built app at: $BUILT_APP_PATH"
           
-          if [ -f "$BUILT_FILE" ]; then
-            cp "$BUILT_FILE" "artifacts/$ARTIFACT_NAME"
-            echo "✓ Copied $BUILT_FILE to artifacts/$ARTIFACT_NAME"
+          if [ -f "$BUILT_APP_PATH" ]; then
+            echo "✓ Built app found at: $BUILT_APP_PATH"
+            
+            # Create artifacts directory
+            mkdir -p artifacts
+            
+            # Generate output filename
+            BUILD_ID="${{ env.BUILD_ID }}"
+            APP_NAME="${{ env.APP_NAME }}"
+            BUILD_TYPE="${{ env.BUILD_TYPE }}"
+            OUTPUT_TYPE="${{ env.OUTPUT_TYPE }}"
+            
+            # Clean app name for filename
+            CLEAN_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
+            ARTIFACT_NAME="${CLEAN_APP_NAME}-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
+            
+            # Copy built app to artifacts
+            cp "$BUILT_APP_PATH" "artifacts/$ARTIFACT_NAME"
+            echo "✓ Copied built app to artifacts/$ARTIFACT_NAME"
+            
+            # Get file size
+            FILE_SIZE=$(stat -c%s "artifacts/$ARTIFACT_NAME")
+            echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+            
+            echo "Build completed successfully!"
+            echo "File: $ARTIFACT_NAME"
+            echo "Size: $FILE_SIZE bytes"
           else
-            echo "✗ Built file not found at $BUILT_FILE"
+            echo "✗ Built app not found at expected path: $BUILT_APP_PATH"
             echo "Available files in build outputs:"
-            find android/app/build/outputs -name "*.apk" -o -name "*.aab" | xargs ls -la
+            find android/app/build/outputs -name "*.apk" -o -name "*.aab" -type f | head -20
             exit 1
           fi
-          
-          # Create build info JSON
-          FILE_SIZE=$(stat -c%s "artifacts/$ARTIFACT_NAME")
+
+      - name: Create build info
+        run: |
+          BUILD_ID="${{ env.BUILD_ID }}"
           TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           
           cat > artifacts/build-info.json << EOF
           {
             "buildId": "$BUILD_ID",
-            "appName": "$APP_NAME", 
-            "buildType": "$BUILD_TYPE",
-            "outputType": "$OUTPUT_TYPE",
+            "appName": "${{ env.APP_NAME }}", 
+            "buildType": "${{ env.BUILD_TYPE }}",
+            "outputType": "${{ env.OUTPUT_TYPE }}",
             "platform": "android",
             "timestamp": "$TIMESTAMP",
             "versionCode": "${{ env.VERSION_CODE }}",
             "versionName": "${{ env.VERSION_NAME }}",
             "namespace": "${{ env.NAME_SPACE }}",
             "websiteAddress": "${{ env.WEBSITE_ADDRESS }}",
-            "fileSize": $FILE_SIZE,
-            "fileName": "$ARTIFACT_NAME",
+            "fileSize": ${{ env.FILE_SIZE }},
+            "fileName": "${{ env.ARTIFACT_NAME }}",
             "hasCustomIcon": ${{ env.HAS_CUSTOM_ICON }}
           }
           EOF
-          
-          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
-          echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
           
           echo "Build info created successfully"
 
