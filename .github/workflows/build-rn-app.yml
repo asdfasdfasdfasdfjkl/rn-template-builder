@@ -125,13 +125,20 @@ jobs:
             local replace=$3
           
             if [ -f "$file" ]; then
-              # Safely replace even if replacement contains / or .
-              perl -i -pe "s/\Q$find\E/\Q$replace\E/g" "$file"
+              perl -i -pe '
+                BEGIN {
+                  ($find, $replace) = @ARGV;
+                  shift; shift;  # drop them, leave only filenames
+                }
+                s/\Q$find\E/$replace/g;
+              ' "$find" "$replace" "$file"
               echo "✓ Updated $file: $find -> $replace"
             else
               echo "✗ File not found: $file"
             fi
           }
+
+
           
           # Apply all replacements matching the working local build
           safe_replace "android/settings.gradle" "rn_project_template" "$MIDDLE_SEGMENT"
