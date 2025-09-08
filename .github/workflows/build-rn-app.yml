@@ -123,10 +123,10 @@ jobs:
             local file=$1
             local find=$2
             local replace=$3
-            
+          
             if [ -f "$file" ]; then
-              # Use perl for more reliable replacement
-              perl -i -pe "s/\Q$find\E/$replace/g" "$file"
+              # Safely replace even if replacement contains / or .
+              perl -i -pe "s/\Q$find\E/\Q$replace\E/g" "$file"
               echo "✓ Updated $file: $find -> $replace"
             else
               echo "✗ File not found: $file"
