@@ -138,7 +138,7 @@ jobs:
           safe_replace "app.json" "rn_project_template" "$MIDDLE_SEGMENT"
           safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" '"rn_project_template"' "\"$MIDDLE_SEGMENT\""
           safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "{{name_space}}" "$NAME_SPACE"
-          safe_replace "app.tsx" "{{website_address}}" "$WEBSITE_ADDRESS"
+          safe_replace "App.tsx" "{{website_address}}" "$WEBSITE_ADDRESS"
           safe_replace "app.json" "{{app_name}}" "$APP_NAME"
           safe_replace "android/app/build.gradle" "{{version_code}}" "$VERSION_CODE"
           safe_replace "android/app/src/main/res/values/strings.xml" "rn_project_template" "$APP_NAME"
