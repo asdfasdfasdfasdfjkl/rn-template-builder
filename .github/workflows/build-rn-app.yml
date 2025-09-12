@@ -32,6 +32,11 @@ on:
         required: false
         default: 'android'
         type: string
+      permissions:
+        description: 'App Permissions (JSON)'
+        required: false
+        default: '{}'
+        type: string
 
 env:
   BUILD_ID: ${{ github.event.inputs.build_id }}
@@ -39,6 +44,7 @@ env:
   BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
   OUTPUT_TYPE: ${{ github.event.inputs.output_type || 'apk' }}
   PLATFORM: ${{ github.event.inputs.platform || 'android' }}
+  PERMISSIONS: ${{ github.event.inputs.permissions || '{}' }}
 
 jobs:
   build-android:
@@ -78,6 +84,7 @@ jobs:
             NAME_SPACE=$(echo $CONFIG | jq -r '.name_space // "com.example.app"')
             APP_ICON=$(echo $CONFIG | jq -r '.app_icon // "null"')
             HAS_CUSTOM_ICON=$(echo $CONFIG | jq -r '.has_custom_icon // "false"')
+            MANIFEST_PERMISSIONS=$(echo $CONFIG | jq -r '.manifestPermissions // ""')
             
             echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
             echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
@@ -85,6 +92,7 @@ jobs:
             echo "NAME_SPACE=$NAME_SPACE" >> $GITHUB_ENV
             echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
+            echo "MANIFEST_PERMISSIONS=$MANIFEST_PERMISSIONS" >> $GITHUB_ENV
             
             echo "Configuration loaded:"
             echo "  Website: $WEBSITE_ADDRESS"
@@ -92,6 +100,7 @@ jobs:
             echo "  Version Name: $VERSION_NAME"
             echo "  Namespace: $NAME_SPACE"
             echo "  Has Custom Icon: $HAS_CUSTOM_ICON"
+            echo "  Permissions: $MANIFEST_PERMISSIONS"
           else
             echo "Error: build-config.json not found!"
             exit 1
@@ -156,6 +165,37 @@ jobs:
           safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
           
           echo "Template customizations applied successfully"
+
+      - name: Update Android Manifest with permissions
+        run: |
+          echo "Updating AndroidManifest.xml with permissions..."
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          
+          if [ -f "$MANIFEST_PATH" ]; then
+            # Create a temporary file with the permissions
+            cat > permissions.txt << 'EOF'
+          ${{ env.MANIFEST_PERMISSIONS }}
+          EOF
+            
+            # Insert permissions after the opening <manifest> tag
+            if [ -n "${{ env.MANIFEST_PERMISSIONS }}" ]; then
+              # Use perl to insert permissions after <manifest> line
+              perl -i -pe 'if (/^<manifest.*>$/) { $_ .= "\n    " . `cat permissions.txt`; chomp; $_ .= "\n"; }' "$MANIFEST_PATH"
+              echo "✓ Permissions added to AndroidManifest.xml"
+              
+              # Show the updated manifest for verification
+              echo "Updated AndroidManifest.xml:"
+              head -20 "$MANIFEST_PATH"
+            else
+              echo "✓ No additional permissions to add"
+            fi
+            
+            # Clean up
+            rm -f permissions.txt
+          else
+            echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
+            exit 1
+          fi
 
       - name: Restructure Java package
         run: |
