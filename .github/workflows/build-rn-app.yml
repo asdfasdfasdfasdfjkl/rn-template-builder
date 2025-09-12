@@ -163,6 +163,8 @@ jobs:
           safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/java/com/rn_project_template/MainApplication.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
+          safe_replace "android/app/src/main/AndroidManifest.xml" "{{PERMISSIONS_PLACEHOLDER}}" "$MANIFEST_PERMISSIONS"
+
           
           echo "Template customizations applied successfully"
 
