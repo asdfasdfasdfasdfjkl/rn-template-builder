@@ -10,20 +10,47 @@ import {
   Dimensions,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { PermissionsAndroid, Platform } from 'react-native';
+
+const PERMISSION_CONFIG = require('./permissionConfig').PERMISSION_CONFIG;
+
 
 // Get device dimensions for better responsive handling
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
+
 const requestPermissions = async () => {
   if (Platform.OS === 'android') {
     try {
-      const permissions = [];
+      const permissionsToRequest = [];
       
-      // Add permissions that need runtime requests (Android 6.0+)
-      // You'll need to check your build config to see which permissions are enabled
+      // Check each permission based on build configuration
+      if (PERMISSION_CONFIG.camera) {
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.CAMERA);
+      }
       
-      if (permissions.length > 0) {
-        const granted = await PermissionsAndroid.requestMultiple(permissions);
+      if (PERMISSION_CONFIG.location) {
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION);
+      }
+      
+      if (PERMISSION_CONFIG.microphone) {
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+      }
+      
+      if (PERMISSION_CONFIG.notifications && Platform.Version >= 33) {
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      }
+      
+      if (PERMISSION_CONFIG.contacts) {
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.READ_CONTACTS);
+        permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.WRITE_CONTACTS);
+      }
+      
+      if (permissionsToRequest.length > 0) {
+        console.log('Requesting permissions:', permissionsToRequest);
+        
+        const granted = await PermissionsAndroid.requestMultiple(permissionsToRequest);
         
         Object.keys(granted).forEach(permission => {
           if (granted[permission] === PermissionsAndroid.RESULTS.GRANTED) {
@@ -32,11 +59,18 @@ const requestPermissions = async () => {
             console.log(`${permission} permission denied`);
           }
         });
+        
+        return granted;
+      } else {
+        console.log('No additional permissions to request');
+        return {};
       }
     } catch (err) {
       console.warn('Permission request error:', err);
+      return {};
     }
   }
+  return {};
 };
 
 const App = () => {
@@ -47,6 +81,7 @@ const App = () => {
   const [statusBarBg, setStatusBarBg] = useState('#ffffff');
   const [refreshing, setRefreshing] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
+const [permissionsGranted, setPermissionsGranted] = useState({});
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -57,7 +92,12 @@ const App = () => {
   const INITIAL_URL = "{{website_address}}";
 
   useEffect(() => {
-  requestPermissions();
+  const initializePermissions = async () => {
+    const granted = await requestPermissions();
+    setPermissionsGranted(granted);
+  };
+  
+  initializePermissions();
 }, []);
 
   useEffect(() => {
