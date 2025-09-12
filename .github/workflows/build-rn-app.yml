@@ -106,11 +106,24 @@ jobs:
             exit 1
           fi
 
-      - name: Install dependencies
+      - name: Create permission configuration
         run: |
-          echo "Installing dependencies..."
-          npm ci --legacy-peer-deps --no-audit --no-fund
-          echo "Dependencies installed successfully"
+          echo "Creating permission configuration..."
+          if [ -f "build-config.json" ]; then
+            PERMISSION_CONFIG=$(echo $CONFIG | jq -r '.permissionConfig // {}')
+            
+            # Create the permission config file for the React Native app
+            cat > src/permissionConfig.js << EOF
+          // Auto-generated permission configuration
+          export const PERMISSION_CONFIG = $PERMISSION_CONFIG;
+          EOF
+            
+            echo "✓ Permission configuration created"
+            echo "Permission Config: $PERMISSION_CONFIG"
+          else
+            echo "Error: build-config.json not found!"
+            exit 1
+          fi
 
       - name: Apply template customizations
         shell: bash
@@ -198,6 +211,12 @@ jobs:
             echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
             exit 1
           fi
+
+      - name: Install dependencies
+        run: |
+          echo "Installing dependencies..."
+          npm ci --legacy-peer-deps --no-audit --no-fund
+          echo "Dependencies installed successfully"
 
       - name: Restructure Java package
         run: |
