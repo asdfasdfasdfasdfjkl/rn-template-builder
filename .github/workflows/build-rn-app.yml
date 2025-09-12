@@ -20,35 +20,17 @@ on:
           - release
           - debug
       output_type:
-        description: 'Output Type (comma-separated for multiple formats)'
+        description: 'Output Type'
         required: false
         default: 'apk'
-        type: string
+        type: choice
+        options:
+          - apk
+          - aab
       platform:
         description: 'Platform'
         required: false
         default: 'android'
-        type: string
-      version_code:
-        description: 'Version Code'
-        required: true
-        type: string
-      version_name:
-        description: 'Version Name'
-        required: true
-        type: string
-      name_space:
-        description: 'App Package Namespace'
-        required: true
-        type: string
-      website_address:
-        description: 'Website URL'
-        required: true
-        type: string
-      permissions:
-        description: 'App Permissions (JSON)'
-        required: false
-        default: '{}'
         type: string
 
 env:
@@ -57,11 +39,6 @@ env:
   BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
   OUTPUT_TYPE: ${{ github.event.inputs.output_type || 'apk' }}
   PLATFORM: ${{ github.event.inputs.platform || 'android' }}
-  VERSION_CODE: ${{ github.event.inputs.version_code }}
-  VERSION_NAME: ${{ github.event.inputs.version_name }}
-  NAME_SPACE: ${{ github.event.inputs.name_space }}
-  WEBSITE_ADDRESS: ${{ github.event.inputs.website_address }}
-  PERMISSIONS: ${{ github.event.inputs.permissions || '{}' }}
 
 jobs:
   build-android:
@@ -101,8 +78,6 @@ jobs:
             NAME_SPACE=$(echo $CONFIG | jq -r '.name_space // "com.example.app"')
             APP_ICON=$(echo $CONFIG | jq -r '.app_icon // "null"')
             HAS_CUSTOM_ICON=$(echo $CONFIG | jq -r '.has_custom_icon // "false"')
-            MANIFEST_PERMISSIONS=$(echo $CONFIG | jq -r '.manifestPermissions // ""')
-            PERMISSION_CONFIG=$(echo $CONFIG | jq -c '.permissionConfig // {}')
             
             echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
             echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
@@ -110,38 +85,23 @@ jobs:
             echo "NAME_SPACE=$NAME_SPACE" >> $GITHUB_ENV
             echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
-            echo "MANIFEST_PERMISSIONS=$MANIFEST_PERMISSIONS" >> $GITHUB_ENV
-            echo "PERMISSION_CONFIG=$PERMISSION_CONFIG" >> $GITHUB_ENV
             
             echo "Configuration loaded:"
             echo "  Website: $WEBSITE_ADDRESS"
-            echo "  Permissions: $PERMISSION_CONFIG"
+            echo "  Version Code: $VERSION_CODE"
+            echo "  Version Name: $VERSION_NAME"
+            echo "  Namespace: $NAME_SPACE"
+            echo "  Has Custom Icon: $HAS_CUSTOM_ICON"
           else
             echo "Error: build-config.json not found!"
             exit 1
           fi
 
-      - name: Create permission configuration
+      - name: Install dependencies
         run: |
-          echo "Creating permission configuration..."
-          
-          # Read the config again to get permission data
-          if [ -f "build-config.json" ]; then
-            CONFIG=$(cat build-config.json)
-            PERMISSION_CONFIG=$(echo $CONFIG | jq -c '.permissionConfig // {}')
-            
-            # Create the permission config file in the root directory
-            cat > permissionConfig.js << EOF
-          // Auto-generated permission configuration
-          export const PERMISSION_CONFIG = $PERMISSION_CONFIG;
-          EOF
-            
-            echo "✓ Permission configuration created in root directory"
-            cat permissionConfig.js
-          else
-            echo "Error: build-config.json not found!"
-            exit 1
-          fi
+          echo "Installing dependencies..."
+          npm ci --legacy-peer-deps --no-audit --no-fund
+          echo "Dependencies installed successfully"
 
       - name: Apply template customizations
         shell: bash
@@ -194,46 +154,8 @@ jobs:
           safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/java/com/rn_project_template/MainApplication.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
-
           
           echo "Template customizations applied successfully"
-
-      - name: Update Android Manifest with permissions
-        run: |
-          echo "Updating AndroidManifest.xml with permissions..."
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          
-          if [ -f "$MANIFEST_PATH" ]; then
-            # Create a temporary file with the permissions
-            cat > permissions.txt << 'EOF'
-          ${{ env.MANIFEST_PERMISSIONS }}
-          EOF
-            
-            # Insert permissions after the opening <manifest> tag
-            if [ -n "${{ env.MANIFEST_PERMISSIONS }}" ]; then
-              # Use perl to insert permissions after <manifest> line
-              perl -i -pe 'if (/^<manifest.*>$/) { $_ .= "\n    " . `cat permissions.txt`; chomp; $_ .= "\n"; }' "$MANIFEST_PATH"
-              echo "✓ Permissions added to AndroidManifest.xml"
-              
-              # Show the updated manifest for verification
-              echo "Updated AndroidManifest.xml:"
-              head -20 "$MANIFEST_PATH"
-            else
-              echo "✓ No additional permissions to add"
-            fi
-            
-            # Clean up
-            rm -f permissions.txt
-          else
-            echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
-            exit 1
-          fi
-
-      - name: Install dependencies
-        run: |
-          echo "Installing dependencies..."
-          npm ci --legacy-peer-deps --no-audit --no-fund
-          echo "Dependencies installed successfully"
 
       - name: Restructure Java package
         run: |
@@ -451,97 +373,72 @@ jobs:
           # Set environment variables matching local build
           export GRADLE_OPTS="-Xmx2g -Dorg.gradle.daemon=false"
           
-          # Handle multiple output types (comma-separated)
-          IFS=',' read -ra OUTPUT_TYPES <<< "${{ env.OUTPUT_TYPE }}"
-          
-          for output_type in "${OUTPUT_TYPES[@]}"; do
-            output_type=$(echo "$output_type" | tr '[:upper:]' '[:lower:]' | xargs) # Convert to lowercase and trim
-            
-            if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
-              if [ "$output_type" == "aab" ]; then
-                echo "Building release AAB..."
-                ./gradlew bundleRelease --stacktrace --info --no-daemon
-              elif [ "$output_type" == "apk" ]; then
-                echo "Building release APK..."
-                ./gradlew assembleRelease --stacktrace --info --no-daemon
-              fi
+          # Determine build arguments based on type and output
+          if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
+            if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
+              echo "Building release AAB..."
+              ./gradlew bundleRelease --stacktrace --info --no-daemon
             else
-              if [ "$output_type" == "apk" ]; then
-                echo "Building debug APK..."
-                ./gradlew assembleDebug --stacktrace --info --no-daemon
-              fi
+              echo "Building release APK..."
+              ./gradlew assembleRelease --stacktrace --info --no-daemon
             fi
-          done
+          else
+            echo "Building debug APK..."
+            ./gradlew assembleDebug --stacktrace --info --no-daemon
+          fi
 
       - name: Verify and copy build outputs
         id: verify_outputs
         run: |
           echo "Verifying build outputs..."
           
-          # Create artifacts directory
-          mkdir -p artifacts
-          
-          # Build ID for naming
-          BUILD_ID="${{ env.BUILD_ID }}"
-          APP_NAME="${{ env.APP_NAME }}"
-          BUILD_TYPE="${{ env.BUILD_TYPE }}"
-          
-          # Clean app name for filename
-          CLEAN_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
-          
-          TOTAL_SIZE=0
-          ARTIFACT_NAMES=()
-          
-          # Handle multiple output types
-          IFS=',' read -ra OUTPUT_TYPES <<< "${{ env.OUTPUT_TYPE }}"
-          
-          for output_type in "${OUTPUT_TYPES[@]}"; do
-            output_type=$(echo "$output_type" | tr '[:upper:]' '[:lower:]' | xargs)
-            
-            # Determine expected build path
-            if [ "$output_type" == "aab" ]; then
-              BUILT_APP_PATH="android/app/build/outputs/bundle/release/app-release.aab"
+          # Determine expected build path based on build type and output type
+          if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
+            BUILT_APP_PATH="android/app/build/outputs/bundle/release/app-release.aab"
+          else
+            if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
+              BUILT_APP_PATH="android/app/build/outputs/apk/release/app-release.apk"
             else
-              if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
-                BUILT_APP_PATH="android/app/build/outputs/apk/release/app-release.apk"
-              else
-                BUILT_APP_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
-              fi
+              BUILT_APP_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
             fi
-            
-            echo "Looking for built app at: $BUILT_APP_PATH"
-            
-            if [ -f "$BUILT_APP_PATH" ]; then
-              echo "✓ Built app found at: $BUILT_APP_PATH"
-              
-              # Generate output filename
-              ARTIFACT_NAME="${CLEAN_APP_NAME}-${BUILD_TYPE}-${BUILD_ID}.${output_type}"
-              
-              # Copy built app to artifacts
-              cp "$BUILT_APP_PATH" "artifacts/$ARTIFACT_NAME"
-              echo "✓ Copied built app to artifacts/$ARTIFACT_NAME"
-              
-              # Get file size
-              FILE_SIZE=$(stat -c%s "artifacts/$ARTIFACT_NAME")
-              TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
-              ARTIFACT_NAMES+=("$ARTIFACT_NAME")
-              
-              echo "File: $ARTIFACT_NAME"
-              echo "Size: $FILE_SIZE bytes"
-            else
-              echo "✗ Built app not found at expected path: $BUILT_APP_PATH"
-              echo "Available files in build outputs:"
-              find android/app/build/outputs -name "*.apk" -o -name "*.aab" -type f | head -20
-              exit 1
-            fi
-          done
+          fi
           
-          echo "TOTAL_SIZE=$TOTAL_SIZE" >> $GITHUB_ENV
-          echo "ARTIFACT_NAMES=${ARTIFACT_NAMES[*]}" >> $GITHUB_ENV
+          echo "Looking for built app at: $BUILT_APP_PATH"
           
-          echo "Build completed successfully!"
-          echo "Total artifacts: ${#ARTIFACT_NAMES[@]}"
-          echo "Total size: $TOTAL_SIZE bytes"
+          if [ -f "$BUILT_APP_PATH" ]; then
+            echo "✓ Built app found at: $BUILT_APP_PATH"
+            
+            # Create artifacts directory
+            mkdir -p artifacts
+            
+            # Generate output filename
+            BUILD_ID="${{ env.BUILD_ID }}"
+            APP_NAME="${{ env.APP_NAME }}"
+            BUILD_TYPE="${{ env.BUILD_TYPE }}"
+            OUTPUT_TYPE="${{ env.OUTPUT_TYPE }}"
+            
+            # Clean app name for filename
+            CLEAN_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
+            ARTIFACT_NAME="${CLEAN_APP_NAME}-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
+            
+            # Copy built app to artifacts
+            cp "$BUILT_APP_PATH" "artifacts/$ARTIFACT_NAME"
+            echo "✓ Copied built app to artifacts/$ARTIFACT_NAME"
+            
+            # Get file size
+            FILE_SIZE=$(stat -c%s "artifacts/$ARTIFACT_NAME")
+            echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+            
+            echo "Build completed successfully!"
+            echo "File: $ARTIFACT_NAME"
+            echo "Size: $FILE_SIZE bytes"
+          else
+            echo "✗ Built app not found at expected path: $BUILT_APP_PATH"
+            echo "Available files in build outputs:"
+            find android/app/build/outputs -name "*.apk" -o -name "*.aab" -type f | head -20
+            exit 1
+          fi
 
       - name: Create build info
         run: |
@@ -560,8 +457,8 @@ jobs:
             "versionName": "${{ env.VERSION_NAME }}",
             "namespace": "${{ env.NAME_SPACE }}",
             "websiteAddress": "${{ env.WEBSITE_ADDRESS }}",
-            "fileSize": ${{ env.TOTAL_SIZE }},
-            "artifacts": "${{ env.ARTIFACT_NAMES }}",
+            "fileSize": ${{ env.FILE_SIZE }},
+            "fileName": "${{ env.ARTIFACT_NAME }}",
             "hasCustomIcon": ${{ env.HAS_CUSTOM_ICON }}
           }
           EOF
@@ -582,33 +479,26 @@ jobs:
           BUILD_ID="${{ env.BUILD_ID }}"
           S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
           S3_PREFIX="builds/${BUILD_ID}"
+          ARTIFACT_NAME="${{ env.ARTIFACT_NAME }}"
           
           if [ -z "$S3_BUCKET" ]; then
             echo "Error: AWS_S3_BUCKET secret not configured"
             exit 1
           fi
           
-          # Upload all artifacts
-          for artifact in artifacts/*.apk artifacts/*.aab; do
-            if [ -f "$artifact" ]; then
-              echo "Uploading $(basename "$artifact") to S3..."
-              aws s3 cp "$artifact" "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
-            fi
-          done
+          # Upload the app file
+          echo "Uploading $ARTIFACT_NAME to S3..."
+          aws s3 cp "artifacts/$ARTIFACT_NAME" "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
           
           # Upload build info
           echo "Uploading build-info.json to S3..."
           aws s3 cp artifacts/build-info.json "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
           
-          # Generate presigned URLs (valid for 7 days) for the first artifact
-          FIRST_ARTIFACT=$(ls artifacts/*.apk artifacts/*.aab 2>/dev/null | head -1)
-          if [ -n "$FIRST_ARTIFACT" ]; then
-            FIRST_ARTIFACT_NAME=$(basename "$FIRST_ARTIFACT")
-            APP_DOWNLOAD_URL=$(aws s3 presign "s3://${S3_BUCKET}/${S3_PREFIX}/${FIRST_ARTIFACT_NAME}" --expires-in 604800)
-            echo "APP_DOWNLOAD_URL=$APP_DOWNLOAD_URL" >> $GITHUB_ENV
-          fi
-          
+          # Generate presigned URLs (valid for 7 days)
+          APP_DOWNLOAD_URL=$(aws s3 presign "s3://${S3_BUCKET}/${S3_PREFIX}/${ARTIFACT_NAME}" --expires-in 604800)
           INFO_DOWNLOAD_URL=$(aws s3 presign "s3://${S3_BUCKET}/${S3_PREFIX}/build-info.json" --expires-in 604800)
+          
+          echo "APP_DOWNLOAD_URL=$APP_DOWNLOAD_URL" >> $GITHUB_ENV
           echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
           
           echo "✓ Upload completed successfully"
@@ -648,7 +538,7 @@ jobs:
             "appName": "${{ env.APP_NAME }}",
             "buildType": "${{ env.BUILD_TYPE }}",
             "outputType": "${{ env.OUTPUT_TYPE }}",
-            "fileSize": ${{ env.TOTAL_SIZE || 0 }}
+            "fileSize": ${{ env.FILE_SIZE || 0 }}
           }
           EOF
           
@@ -673,8 +563,7 @@ jobs:
           echo "Version: ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})"
           
           if [ "${{ job.status }}" == "success" ]; then
-            echo "Total File Size: ${{ env.TOTAL_SIZE }} bytes"
-            echo "Artifacts: ${{ env.ARTIFACT_NAMES }}"
+            echo "File Size: ${{ env.FILE_SIZE }} bytes"
             echo "Download URL: ${{ env.APP_DOWNLOAD_URL }}"
           fi
           echo "=================================="
