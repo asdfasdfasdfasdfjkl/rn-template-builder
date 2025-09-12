@@ -14,6 +14,31 @@ import { WebView } from 'react-native-webview';
 // Get device dimensions for better responsive handling
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
+const requestPermissions = async () => {
+  if (Platform.OS === 'android') {
+    try {
+      const permissions = [];
+      
+      // Add permissions that need runtime requests (Android 6.0+)
+      // You'll need to check your build config to see which permissions are enabled
+      
+      if (permissions.length > 0) {
+        const granted = await PermissionsAndroid.requestMultiple(permissions);
+        
+        Object.keys(granted).forEach(permission => {
+          if (granted[permission] === PermissionsAndroid.RESULTS.GRANTED) {
+            console.log(`${permission} permission granted`);
+          } else {
+            console.log(`${permission} permission denied`);
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Permission request error:', err);
+    }
+  }
+};
+
 const App = () => {
   const webViewRef = useRef<WebView>(null);
   const [statusBarStyle, setStatusBarStyle] = useState<
@@ -30,6 +55,10 @@ const App = () => {
 
   // Replace this URL with your desired URL
   const INITIAL_URL = "{{website_address}}";
+
+  useEffect(() => {
+  requestPermissions();
+}, []);
 
   useEffect(() => {
     const backAction = () => {
