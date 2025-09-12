@@ -6,42 +6,49 @@ import {
   Alert,
   StatusBar,
   Platform,
+  View,
+  Dimensions,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 
+// Get device dimensions for better responsive handling
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
 const App = () => {
   const webViewRef = useRef<WebView>(null);
-  // React state for StatusBar style & background
   const [statusBarStyle, setStatusBarStyle] = useState<
     'light-content' | 'dark-content'
   >('dark-content');
-  const [statusBarBg, setStatusBarBg] = useState('#000000ff');
+  const [statusBarBg, setStatusBarBg] = useState('#ffffff');
   const [refreshing, setRefreshing] = useState(false);
+  const [canGoBack, setCanGoBack] = useState(false);
 
   const onRefresh = () => {
     setRefreshing(true);
-    webViewRef.current?.reload(); // Reload the webview
+    webViewRef.current?.reload();
   };
 
   // Replace this URL with your desired URL
-  const INITIAL_URL = "{{website_address}}";
+  const INITIAL_URL = "https://qavola.com";
 
   useEffect(() => {
     const backAction = () => {
-      if (webViewRef.current) {
-        // Check if we can go back in WebView
-        webViewRef.current.injectJavaScript(`
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'CAN_GO_BACK',
-            canGoBack: window.history.length > 1
-          }));
-        `);
-
-        // Try to go back, if it fails we'll handle it in onMessage
+      if (webViewRef.current && canGoBack) {
         webViewRef.current.goBack();
         return true; // Prevent default back button behavior
+      } else {
+        // Show exit confirmation when user tries to go back from first page
+        Alert.alert(
+          'Exit App', 
+          'Do you want to exit the app?', 
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Exit', onPress: () => BackHandler.exitApp() },
+          ],
+          { cancelable: true }
+        );
+        return true;
       }
-      return false;
     };
 
     const backHandler = BackHandler.addEventListener(
@@ -50,75 +57,139 @@ const App = () => {
     );
 
     return () => backHandler.remove();
-  }, []);
-
-  useEffect(() => {
-    console.log(statusBarBg);
-    console.log(statusBarStyle);
-  }, [statusBarBg, statusBarStyle]);
+  }, [canGoBack]);
 
   const onNavigationStateChange = (navState: any) => {
-    // Store navigation state for back button handling
-    webViewRef.current.canGoBack = navState.canGoBack;
-  };
-
-  const handleBackPress = () => {
-    if (webViewRef.current) {
-      webViewRef.current.goBack();
+    setCanGoBack(navState.canGoBack);
+    // Stop refreshing when navigation completes
+    if (refreshing) {
+      setRefreshing(false);
     }
   };
 
   const injectedJS = `
-  (function() {
-    function rgbToHex(color) {
-      const rgb = color.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
-      if (!rgb) return color; // If not rgb/rgba, assume it's already hex
-      const r = parseInt(rgb[1], 10);
-      const g = parseInt(rgb[2], 10);
-      const b = parseInt(rgb[3], 10);
-      return "#" + [r, g, b].map(x =>
-        x.toString(16).padStart(2, '0')
-      ).join('');
-    }
+    (function() {
+      function rgbToHex(color) {
+        if (!color) return '#ffffff';
+        
+        // Handle hex colors
+        if (color.startsWith('#')) return color;
+        
+        // Handle rgb/rgba colors
+        const rgb = color.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
+        if (!rgb) return '#ffffff';
+        
+        const r = parseInt(rgb[1], 10);
+        const g = parseInt(rgb[2], 10);
+        const b = parseInt(rgb[3], 10);
+        
+        return "#" + [r, g, b].map(x => {
+          const hex = x.toString(16);
+          return hex.length === 1 ? '0' + hex : hex;
+        }).join('');
+      }
 
-    function isDark(hexColor) {
-      // Remove "#" if present
-      const hex = hexColor.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
-      return luminance < 0.5;
-    }
+      function isDark(hexColor) {
+        const hex = hexColor.replace('#', '');
+        if (hex.length !== 6) return false;
+        
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+        
+        // Use proper luminance calculation
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return luminance < 0.5;
+      }
 
-    function getTheme() {
-      const bodyStyle = window.getComputedStyle(document.body);
-      const rawColor = bodyStyle.backgroundColor || '#ffffff';
-      const backgroundColor = rgbToHex(rawColor);
-      const darkMode = isDark(backgroundColor);
+      function getTheme() {
+        try {
+          const bodyStyle = window.getComputedStyle(document.body);
+          const htmlStyle = window.getComputedStyle(document.documentElement);
+          
+          // Try multiple sources for background color
+          const rawColor = bodyStyle.backgroundColor || 
+                           htmlStyle.backgroundColor || 
+                           '#ffffff';
+          
+          const backgroundColor = rgbToHex(rawColor);
+          const darkMode = isDark(backgroundColor);
 
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'THEME_UPDATE',
-        theme: {
-          backgroundColor,
-          barStyle: darkMode ? 'light-content' : 'dark-content'
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'THEME_UPDATE',
+            theme: {
+              backgroundColor,
+              barStyle: darkMode ? 'light-content' : 'dark-content'
+            }
+          }));
+        } catch (error) {
+          // Fallback to default theme
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'THEME_UPDATE',
+            theme: {
+              backgroundColor: '#ffffff',
+              barStyle: 'dark-content'
+            }
+          }));
         }
-      }));
-    }
+      }
 
-    getTheme();
-    setInterval(getTheme, 5000);
-  })();
-`;
+      // Initial theme detection
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', getTheme);
+      } else {
+        getTheme();
+      }
+
+      // Periodic theme detection
+      let themeInterval = setInterval(getTheme, 3000);
+      
+      // Also check on visibility change
+      document.addEventListener('visibilitychange', getTheme);
+      
+      // Cleanup interval when page unloads
+      window.addEventListener('beforeunload', () => {
+        clearInterval(themeInterval);
+      });
+
+      // Add viewport meta tag if not present for better mobile experience
+      if (!document.querySelector('meta[name="viewport"]')) {
+        const viewport = document.createElement('meta');
+        viewport.name = 'viewport';
+        viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+        document.head.appendChild(viewport);
+      }
+    })();
+  `;
+
+  const onError = (syntheticEvent: any) => {
+    const { nativeEvent } = syntheticEvent;
+    console.warn('WebView error: ', nativeEvent);
+    
+    Alert.alert(
+      'Connection Error',
+      'Unable to load the page. Please check your internet connection and try again.',
+      [
+        { text: 'Retry', onPress: () => webViewRef.current?.reload() },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const onHttpError = (syntheticEvent: any) => {
+    const { nativeEvent } = syntheticEvent;
+    console.warn('WebView HTTP error: ', nativeEvent);
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar
         barStyle={statusBarStyle}
         backgroundColor={statusBarBg}
         translucent={false}
       />
-      <SafeAreaView style={styles.webviewContainer}>
+      
+      <SafeAreaView style={[styles.webviewContainer, { backgroundColor: statusBarBg }]}>
         <WebView
           ref={webViewRef}
           source={{ uri: INITIAL_URL }}
@@ -129,38 +200,52 @@ const App = () => {
           startInLoadingState={true}
           scalesPageToFit={false}
           mixedContentMode="compatibility"
-          allowsBackForwardNavigationGestures={true}
+          allowsBackForwardNavigationGestures={Platform.OS === 'ios'}
           showsHorizontalScrollIndicator={false}
           showsVerticalScrollIndicator={false}
-          bounces={false}
+          bounces={Platform.OS === 'ios'}
           scrollEnabled={true}
           injectedJavaScript={injectedJS}
+          allowsInlineMediaPlayback={true}
+          mediaPlaybackRequiresUserAction={false}
+          allowsFullscreenVideo={true}
+          pullToRefreshEnabled={true}
+          onRefresh={onRefresh}
+          refreshing={refreshing}
+          
+          // Error handling
+          onError={onError}
+          onHttpError={onHttpError}
+          
           // Handle messages from WebView
           onMessage={event => {
             try {
               const data = JSON.parse(event.nativeEvent.data);
+              
               if (data.type === 'THEME_UPDATE' && data.theme) {
                 setStatusBarStyle(data.theme.barStyle);
                 setStatusBarBg(data.theme.backgroundColor);
               }
-              if (data.type === 'CAN_GO_BACK' && !data.canGoBack) {
-                // Show exit confirmation when user tries to go back from first page
-                Alert.alert('Exit App', 'Do you want to exit the app?', [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Exit', onPress: () => BackHandler.exitApp() },
-                ]);
-              }
             } catch (error) {
-              // Handle any parsing errors silently
+              console.warn('Error parsing WebView message:', error);
             }
           }}
-          // Ensure WebView handles back navigation properly
+          
+          // Security and performance
           onShouldStartLoadWithRequest={request => {
+            // Add any URL filtering logic here if needed
             return true;
           }}
+          
+          // Additional WebView props for better UX
+          textZoom={100}
+          cacheEnabled={true}
+          incognito={false}
+          thirdPartyCookiesEnabled={true}
+          sharedCookiesEnabled={true}
         />
       </SafeAreaView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -172,13 +257,18 @@ const styles = StyleSheet.create({
   webviewContainer: {
     flex: 1,
     backgroundColor: '#ffffff',
-    // paddingTop: Platform.OS === 'ios' ? 0 : StatusBar.currentHeight || 0,
+    // Ensure proper spacing on all devices
+    paddingTop: Platform.select({
+      ios: 0, // SafeAreaView handles this on iOS
+      android: 0, // StatusBar with translucent={false} handles this
+      default: 0,
+    }),
   },
   webview: {
     flex: 1,
     width: '100%',
     height: '100%',
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
   },
 });
 
