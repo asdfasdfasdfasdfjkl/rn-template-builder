@@ -85,6 +85,7 @@ jobs:
             APP_ICON=$(echo $CONFIG | jq -r '.app_icon // "null"')
             HAS_CUSTOM_ICON=$(echo $CONFIG | jq -r '.has_custom_icon // "false"')
             MANIFEST_PERMISSIONS=$(echo $CONFIG | jq -r '.manifestPermissions // ""')
+            PERMISSION_CONFIG=$(echo $CONFIG | jq -c '.permissionConfig // {}')
             
             echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
             echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
@@ -93,14 +94,11 @@ jobs:
             echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
             echo "MANIFEST_PERMISSIONS=$MANIFEST_PERMISSIONS" >> $GITHUB_ENV
+            echo "PERMISSION_CONFIG=$PERMISSION_CONFIG" >> $GITHUB_ENV
             
             echo "Configuration loaded:"
             echo "  Website: $WEBSITE_ADDRESS"
-            echo "  Version Code: $VERSION_CODE"
-            echo "  Version Name: $VERSION_NAME"
-            echo "  Namespace: $NAME_SPACE"
-            echo "  Has Custom Icon: $HAS_CUSTOM_ICON"
-            echo "  Permissions: $MANIFEST_PERMISSIONS"
+            echo "  Permissions: $PERMISSION_CONFIG"
           else
             echo "Error: build-config.json not found!"
             exit 1
@@ -109,21 +107,15 @@ jobs:
       - name: Create permission configuration
         run: |
           echo "Creating permission configuration..."
-          if [ -f "build-config.json" ]; then
-            PERMISSION_CONFIG=$(echo $CONFIG | jq -r '.permissionConfig // {}')
-            
-            # Create the permission config file for the React Native app
-            cat > src/permissionConfig.js << EOF
+          
+          # Create the permission config file in the root directory
+          cat > permissionConfig.js << EOF
           // Auto-generated permission configuration
-          export const PERMISSION_CONFIG = $PERMISSION_CONFIG;
+          export const PERMISSION_CONFIG = ${{ env.PERMISSION_CONFIG }};
           EOF
-            
-            echo "✓ Permission configuration created"
-            echo "Permission Config: $PERMISSION_CONFIG"
-          else
-            echo "Error: build-config.json not found!"
-            exit 1
-          fi
+          
+          echo "✓ Permission configuration created in root directory"
+          cat permissionConfig.js
 
       - name: Apply template customizations
         shell: bash
