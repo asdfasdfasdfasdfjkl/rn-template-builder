@@ -108,14 +108,23 @@ jobs:
         run: |
           echo "Creating permission configuration..."
           
-          # Create the permission config file in the root directory
-          cat > permissionConfig.js << EOF
+          # Read the config again to get permission data
+          if [ -f "build-config.json" ]; then
+            CONFIG=$(cat build-config.json)
+            PERMISSION_CONFIG=$(echo $CONFIG | jq -c '.permissionConfig // {}')
+            
+            # Create the permission config file in the root directory
+            cat > permissionConfig.js << EOF
           // Auto-generated permission configuration
-          export const PERMISSION_CONFIG = ${{ env.PERMISSION_CONFIG }};
+          export const PERMISSION_CONFIG = $PERMISSION_CONFIG;
           EOF
-          
-          echo "✓ Permission configuration created in root directory"
-          cat permissionConfig.js
+            
+            echo "✓ Permission configuration created in root directory"
+            cat permissionConfig.js
+          else
+            echo "Error: build-config.json not found!"
+            exit 1
+          fi
 
       - name: Apply template customizations
         shell: bash
@@ -168,7 +177,6 @@ jobs:
           safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/java/com/rn_project_template/MainApplication.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
-          safe_replace "android/app/src/main/AndroidManifest.xml" "{{PERMISSIONS_PLACEHOLDER}}" "$MANIFEST_PERMISSIONS"
 
           
           echo "Template customizations applied successfully"
