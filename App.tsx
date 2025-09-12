@@ -29,7 +29,7 @@ const App = () => {
   };
 
   // Replace this URL with your desired URL
-  const INITIAL_URL = "{{WEBSITE_URL}}";
+  const INITIAL_URL = "{{website_address}}";
 
   useEffect(() => {
     const backAction = () => {
