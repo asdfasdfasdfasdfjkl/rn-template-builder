@@ -239,20 +239,37 @@ jobs:
             PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.INTERNET\" />\n"
             PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n"
             
-            # Insert permissions after the manifest opening tag
+            # Use sed instead of perl for more reliable XML manipulation
             if [ -n "$PERMISSIONS" ]; then
-              perl -i -pe "
-                if (/<manifest[^>]*>/) {
-                  print;
-                  print qq(\n$PERMISSIONS);
-                  next;
-                }
-                print;
-              " "$MANIFEST_PATH"
-              
-              echo "✓ Permissions added to AndroidManifest.xml"
+              # Method 1: Replace placeholder if it exists
+              if grep -q "{{PERMISSIONS_PLACEHOLDER}}" "$MANIFEST_PATH"; then
+                # Replace the placeholder with actual permissions
+                sed -i "s|{{PERMISSIONS_PLACEHOLDER}}|$(echo -e "$PERMISSIONS")|g" "$MANIFEST_PATH"
+                echo "✓ Permissions replaced via placeholder"
+              else
+                # Method 2: Insert after manifest opening tag (more robust)
+                # First, find the line with the closing > of the manifest tag
+                sed -i '/<manifest[^>]*>/,/>/ {
+                  />/ {
+                    a\
+                    '"$(echo -e "$PERMISSIONS")"'
+                  }
+                }' "$MANIFEST_PATH"
+                echo "✓ Permissions added after manifest tag"
+              fi
             else
               echo "✓ No additional permissions to add"
+            fi
+            
+            # Validate the XML is well-formed
+            if command -v xmllint >/dev/null 2>&1; then
+              if xmllint --noout "$MANIFEST_PATH" 2>/dev/null; then
+                echo "✓ AndroidManifest.xml is valid XML"
+              else
+                echo "✗ AndroidManifest.xml is malformed, restoring backup"
+                cp "${MANIFEST_PATH}.backup" "$MANIFEST_PATH"
+                exit 1
+              fi
             fi
             
             echo "Updated AndroidManifest.xml (first 30 lines):"
