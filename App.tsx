@@ -7,13 +7,12 @@ import {
   StatusBar,
   Platform,
   View,
+  PermissionsAndroid
   Dimensions,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { PermissionsAndroid, Platform } from 'react-native';
 
 const PERMISSION_CONFIG = require('./permissionConfig').PERMISSION_CONFIG;
-
 
 // Get device dimensions for better responsive handling
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
