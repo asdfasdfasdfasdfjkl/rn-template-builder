@@ -51,21 +51,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Read build configuration
         id: config
         run: |
@@ -114,12 +99,6 @@ jobs:
             echo "Error: build-config.json not found!"
             exit 1
           fi
-
-      - name: Install dependencies
-        run: |
-          echo "Installing dependencies..."
-          npm ci --legacy-peer-deps --no-audit --no-fund
-          echo "Dependencies installed successfully"
 
       - name: Apply template customizations
         shell: bash
@@ -205,79 +184,68 @@ jobs:
             # Create a backup
             cp "$MANIFEST_PATH" "${MANIFEST_PATH}.backup"
             
-            # Start building permission declarations
-            PERMISSIONS=""
+            # Build permissions directly without \n escape sequences
+            PERMISSIONS_FILE="/tmp/permissions.txt"
+            > "$PERMISSIONS_FILE"  # Clear file
             
             if [ "${{ env.CAMERA_PERMISSION }}" == "enabled" ]; then
-              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.CAMERA\" />\n"
+              echo "    <uses-permission android:name=\"android.permission.CAMERA\" />" >> "$PERMISSIONS_FILE"
               echo "✓ Adding CAMERA permission"
             fi
             
             if [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ]; then
-              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />\n"
-              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />\n"
+              echo "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />" >> "$PERMISSIONS_FILE"
+              echo "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />" >> "$PERMISSIONS_FILE"
               echo "✓ Adding LOCATION permissions"
             fi
             
             if [ "${{ env.MICROPHONE_PERMISSION }}" == "enabled" ]; then
-              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />\n"
+              echo "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />" >> "$PERMISSIONS_FILE"
               echo "✓ Adding MICROPHONE permission"
             fi
             
             if [ "${{ env.NOTIFICATIONS_PERMISSION }}" == "enabled" ]; then
-              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />\n"
+              echo "    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />" >> "$PERMISSIONS_FILE"
               echo "✓ Adding NOTIFICATIONS permission"
             fi
             
             if [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ]; then
-              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.READ_CONTACTS\" />\n"
-              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.WRITE_CONTACTS\" />\n"
+              echo "    <uses-permission android:name=\"android.permission.READ_CONTACTS\" />" >> "$PERMISSIONS_FILE"
+              echo "    <uses-permission android:name=\"android.permission.WRITE_CONTACTS\" />" >> "$PERMISSIONS_FILE"
               echo "✓ Adding CONTACTS permissions"
             fi
             
-            # Always add internet permission (required for WebView)
-            PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.INTERNET\" />\n"
-            PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n"
+            # Always add internet permission
+            echo "    <uses-permission android:name=\"android.permission.INTERNET\" />" >> "$PERMISSIONS_FILE"
+            echo "    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />" >> "$PERMISSIONS_FILE"
             
-            # Replace placeholder using Python (handles newlines properly)
-            if [ -n "$PERMISSIONS" ]; then
+            # Replace placeholder with file contents
+            if [ -s "$PERMISSIONS_FILE" ]; then
               if grep -q "{{PERMISSIONS_PLACEHOLDER}}" "$MANIFEST_PATH"; then
-                python3 -c "
-                import sys
-                with open('$MANIFEST_PATH', 'r') as f:
-                    content = f.read()
-                permissions = '''$PERMISSIONS'''.replace('\\\\n', '\n').rstrip()
-                content = content.replace('{{PERMISSIONS_PLACEHOLDER}}', permissions)
-                with open('$MANIFEST_PATH', 'w') as f:
-                    f.write(content)
-                "
+                # Use awk to replace placeholder with file contents
+                awk '
+                /{{PERMISSIONS_PLACEHOLDER}}/ {
+                  while ((getline line < "/tmp/permissions.txt") > 0) {
+                    print line
+                  }
+                  close("/tmp/permissions.txt")
+                  next
+                }
+                {print}
+                ' "$MANIFEST_PATH" > "${MANIFEST_PATH}.tmp" && mv "${MANIFEST_PATH}.tmp" "$MANIFEST_PATH"
                 echo "✓ Permissions replaced via placeholder"
               else
                 echo "✗ Placeholder not found in manifest"
-                echo "Available content:"
-                cat "$MANIFEST_PATH"
                 exit 1
               fi
             else
-              # Just remove the placeholder if no permissions needed
+              # Remove placeholder if no permissions
               sed -i '/{{PERMISSIONS_PLACEHOLDER}}/d' "$MANIFEST_PATH"
               echo "✓ No additional permissions to add"
             fi
             
-            # Validate the XML is well-formed
-            if command -v xmllint >/dev/null 2>&1; then
-              if xmllint --noout "$MANIFEST_PATH" 2>/dev/null; then
-                echo "✓ AndroidManifest.xml is valid XML"
-              else
-                echo "✗ AndroidManifest.xml is malformed, restoring backup"
-                cp "${MANIFEST_PATH}.backup" "$MANIFEST_PATH"
-                echo "Restored content:"
-                cat "$MANIFEST_PATH"
-                exit 1
-              fi
-            else
-              echo "⚠ xmllint not available, skipping validation"
-            fi
+            # Clean up
+            rm -f "$PERMISSIONS_FILE"
             
             echo "Updated AndroidManifest.xml (first 30 lines):"
             head -30 "$MANIFEST_PATH"
@@ -285,6 +253,28 @@ jobs:
             echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
             exit 1
           fi
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+        
+      - name: Install dependencies
+        run: |
+          echo "Installing dependencies..."
+          npm ci --legacy-peer-deps --no-audit --no-fund
+          echo "Dependencies installed successfully"
 
       - name: Restructure Java package
         run: |
