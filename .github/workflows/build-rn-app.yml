@@ -79,12 +79,24 @@ jobs:
             APP_ICON=$(echo $CONFIG | jq -r '.app_icon // "null"')
             HAS_CUSTOM_ICON=$(echo $CONFIG | jq -r '.has_custom_icon // "false"')
             
+            # Extract permissions with defaults
+            CAMERA_PERMISSION=$(echo $CONFIG | jq -r '.permissions.camera // "disabled"')
+            LOCATION_PERMISSION=$(echo $CONFIG | jq -r '.permissions.location // "disabled"')
+            MICROPHONE_PERMISSION=$(echo $CONFIG | jq -r '.permissions.microphone // "disabled"')
+            NOTIFICATIONS_PERMISSION=$(echo $CONFIG | jq -r '.permissions.notifications // "disabled"')
+            CONTACTS_PERMISSION=$(echo $CONFIG | jq -r '.permissions.contacts // "disabled"')
+            
             echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
             echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
             echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
             echo "NAME_SPACE=$NAME_SPACE" >> $GITHUB_ENV
             echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
             echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
+            echo "CAMERA_PERMISSION=$CAMERA_PERMISSION" >> $GITHUB_ENV
+            echo "LOCATION_PERMISSION=$LOCATION_PERMISSION" >> $GITHUB_ENV
+            echo "MICROPHONE_PERMISSION=$MICROPHONE_PERMISSION" >> $GITHUB_ENV
+            echo "NOTIFICATIONS_PERMISSION=$NOTIFICATIONS_PERMISSION" >> $GITHUB_ENV
+            echo "CONTACTS_PERMISSION=$CONTACTS_PERMISSION" >> $GITHUB_ENV
             
             echo "Configuration loaded:"
             echo "  Website: $WEBSITE_ADDRESS"
@@ -92,6 +104,12 @@ jobs:
             echo "  Version Name: $VERSION_NAME"
             echo "  Namespace: $NAME_SPACE"
             echo "  Has Custom Icon: $HAS_CUSTOM_ICON"
+            echo "  Permissions:"
+            echo "    Camera: $CAMERA_PERMISSION"
+            echo "    Location: $LOCATION_PERMISSION"
+            echo "    Microphone: $MICROPHONE_PERMISSION"
+            echo "    Notifications: $NOTIFICATIONS_PERMISSION"
+            echo "    Contacts: $CONTACTS_PERMISSION"
           else
             echo "Error: build-config.json not found!"
             exit 1
@@ -156,6 +174,93 @@ jobs:
           safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
           
           echo "Template customizations applied successfully"
+
+      - name: Generate permission configuration
+        run: |
+          echo "Generating permission configuration..."
+          
+          # Create permissionConfig.js
+          cat > permissionConfig.js << EOF
+          // Auto-generated permission configuration
+          export const PERMISSION_CONFIG = {
+            camera: ${{ env.CAMERA_PERMISSION == 'enabled' && 'true' || 'false' }},
+            location: ${{ env.LOCATION_PERMISSION == 'enabled' && 'true' || 'false' }},
+            microphone: ${{ env.MICROPHONE_PERMISSION == 'enabled' && 'true' || 'false' }},
+            notifications: ${{ env.NOTIFICATIONS_PERMISSION == 'enabled' && 'true' || 'false' }},
+            contacts: ${{ env.CONTACTS_PERMISSION == 'enabled' && 'true' || 'false' }}
+          };
+          EOF
+          
+          echo "✓ Permission configuration generated"
+
+      - name: Update Android manifest with permissions
+        run: |
+          echo "Updating AndroidManifest.xml with required permissions..."
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          
+          if [ -f "$MANIFEST_PATH" ]; then
+            echo "Original AndroidManifest.xml:"
+            head -20 "$MANIFEST_PATH"
+            
+            # Create a backup
+            cp "$MANIFEST_PATH" "${MANIFEST_PATH}.backup"
+            
+            # Start building permission declarations
+            PERMISSIONS=""
+            
+            if [ "${{ env.CAMERA_PERMISSION }}" == "enabled" ]; then
+              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.CAMERA\" />\n"
+              echo "✓ Adding CAMERA permission"
+            fi
+            
+            if [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ]; then
+              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />\n"
+              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />\n"
+              echo "✓ Adding LOCATION permissions"
+            fi
+            
+            if [ "${{ env.MICROPHONE_PERMISSION }}" == "enabled" ]; then
+              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />\n"
+              echo "✓ Adding MICROPHONE permission"
+            fi
+            
+            if [ "${{ env.NOTIFICATIONS_PERMISSION }}" == "enabled" ]; then
+              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />\n"
+              echo "✓ Adding NOTIFICATIONS permission"
+            fi
+            
+            if [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ]; then
+              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.READ_CONTACTS\" />\n"
+              PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.WRITE_CONTACTS\" />\n"
+              echo "✓ Adding CONTACTS permissions"
+            fi
+            
+            # Always add internet permission (required for WebView)
+            PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.INTERNET\" />\n"
+            PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n"
+            
+            # Insert permissions after the manifest opening tag
+            if [ -n "$PERMISSIONS" ]; then
+              perl -i -pe "
+                if (/<manifest[^>]*>/) {
+                  print;
+                  print qq(\n$PERMISSIONS);
+                  next;
+                }
+                print;
+              " "$MANIFEST_PATH"
+              
+              echo "✓ Permissions added to AndroidManifest.xml"
+            else
+              echo "✓ No additional permissions to add"
+            fi
+            
+            echo "Updated AndroidManifest.xml (first 30 lines):"
+            head -30 "$MANIFEST_PATH"
+          else
+            echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
+            exit 1
+          fi
 
       - name: Restructure Java package
         run: |
