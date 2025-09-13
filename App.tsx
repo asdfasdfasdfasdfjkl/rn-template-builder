@@ -7,7 +7,7 @@ import {
   StatusBar,
   Platform,
   View,
-  PermissionsAndroid
+  PermissionsAndroid,
   Dimensions,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -274,7 +274,7 @@ const [permissionsGranted, setPermissionsGranted] = useState({});
           bounces={Platform.OS === 'ios'}
           scrollEnabled={true}
           injectedJavaScript={injectedJS}
-          allowsInlineMediaPlayback={true}
+          allowsInlineMediaPlaybook={true}
           mediaPlaybackRequiresUserAction={false}
           allowsFullscreenVideo={true}
           pullToRefreshEnabled={true}
