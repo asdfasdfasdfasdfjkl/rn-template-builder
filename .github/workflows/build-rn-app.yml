@@ -239,25 +239,28 @@ jobs:
             PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.INTERNET\" />\n"
             PERMISSIONS="$PERMISSIONS    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n"
             
-            # Use sed instead of perl for more reliable XML manipulation
+            # Replace placeholder using Python (handles newlines properly)
             if [ -n "$PERMISSIONS" ]; then
-              # Method 1: Replace placeholder if it exists
               if grep -q "{{PERMISSIONS_PLACEHOLDER}}" "$MANIFEST_PATH"; then
-                # Replace the placeholder with actual permissions
-                sed -i "s|{{PERMISSIONS_PLACEHOLDER}}|$(echo -e "$PERMISSIONS")|g" "$MANIFEST_PATH"
+                python3 -c "
+                import sys
+                with open('$MANIFEST_PATH', 'r') as f:
+                    content = f.read()
+                permissions = '''$PERMISSIONS'''.replace('\\\\n', '\n').rstrip()
+                content = content.replace('{{PERMISSIONS_PLACEHOLDER}}', permissions)
+                with open('$MANIFEST_PATH', 'w') as f:
+                    f.write(content)
+                "
                 echo "✓ Permissions replaced via placeholder"
               else
-                # Method 2: Insert after manifest opening tag (more robust)
-                # First, find the line with the closing > of the manifest tag
-                sed -i '/<manifest[^>]*>/,/>/ {
-                  />/ {
-                    a\
-                    '"$(echo -e "$PERMISSIONS")"'
-                  }
-                }' "$MANIFEST_PATH"
-                echo "✓ Permissions added after manifest tag"
+                echo "✗ Placeholder not found in manifest"
+                echo "Available content:"
+                cat "$MANIFEST_PATH"
+                exit 1
               fi
             else
+              # Just remove the placeholder if no permissions needed
+              sed -i '/{{PERMISSIONS_PLACEHOLDER}}/d' "$MANIFEST_PATH"
               echo "✓ No additional permissions to add"
             fi
             
@@ -268,8 +271,12 @@ jobs:
               else
                 echo "✗ AndroidManifest.xml is malformed, restoring backup"
                 cp "${MANIFEST_PATH}.backup" "$MANIFEST_PATH"
+                echo "Restored content:"
+                cat "$MANIFEST_PATH"
                 exit 1
               fi
+            else
+              echo "⚠ xmllint not available, skipping validation"
             fi
             
             echo "Updated AndroidManifest.xml (first 30 lines):"
