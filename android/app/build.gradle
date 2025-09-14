@@ -3,17 +3,10 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 react {
-    // Enable build cache for faster builds
-    bundleCommand = "bundle"
-    bundleAssetName = "index.android.bundle"
-    entryFile = file("../index.js")
     autolinkLibrariesWithApp()
 }
 
-// Enable Proguard for release builds to reduce size
 def enableProguardInReleaseBuilds = true
-
-// Use standard JSC (lighter than international variant)
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
@@ -22,6 +15,7 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.rn_project_template"
+    
     defaultConfig {
         applicationId "com.rn_project_template"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -29,11 +23,8 @@ android {
         versionCode {{version_code}}
         versionName "{{version_name}}"
         
-        // Reduce APK size by excluding unused resources
-        resConfigs "en", "xxhdpi"
-        
-        // Enable multidex if needed (but try to avoid)
-        // multiDexEnabled true
+        // Remove density filtering - let APK splits handle this
+        resConfigs "en"
     }
     
     signingConfigs {
@@ -50,51 +41,48 @@ android {
             enable true
             reset()
             include "arm64-v8a", "armeabi-v7a"
-            universalApk false // Don't generate universal APK
+            universalApk false
+        }
+        // Add density splits if you want separate APKs for different screen densities
+        density {
+            enable false  // Set to true if you want density splits
+            reset()
+            include "ldpi", "mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"
         }
     }
     
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            // Faster debug builds
             minifyEnabled false
             shrinkResources false
         }
         release {
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
-            shrinkResources true // Remove unused resources
-            zipAlignEnabled true // Optimize APK alignment
+            shrinkResources true
+            zipAlignEnabled true
             
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
-            
-            // Enable separate APKs per architecture for smaller downloads
-            splits.abi.enable = true
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
     
-    // Optimize compilation
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
     
-    packagingOptions {
-        pickFirst "**/libc++_shared.so"
-        pickFirst "**/libjsc.so"
-        
-        // Exclude unnecessary files
-        exclude "META-INF/DEPENDENCIES"
-        exclude "META-INF/LICENSE"
-        exclude "META-INF/LICENSE.txt"
-        exclude "META-INF/NOTICE"
-        exclude "META-INF/NOTICE.txt"
-    }
-    
-    // Enable build cache for faster incremental builds
-    buildFeatures {
-        buildConfig true
+    packaging {
+        resources {
+            pickFirsts += ['**/libc++_shared.so', '**/libjsc.so']
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt'
+            ]
+        }
     }
 }
 
@@ -105,20 +93,5 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
-    }
-}
-
-// Additional optimizations for CI/CD
-tasks.whenTaskAdded { task ->
-    if (task.name == 'bundleReleaseJsAndAssets') {
-        task.doFirst {
-            // Optimize bundle size
-            project.ext.react = [
-                bundleCommand: "bundle",
-                bundleConfig: "metro.config.js",
-                entryFile: "index.js",
-                extraPackagerArgs: ["--reset-cache", "--minify"]
-            ]
-        }
     }
 }
