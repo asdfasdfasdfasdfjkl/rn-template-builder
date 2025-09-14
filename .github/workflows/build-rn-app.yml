@@ -475,6 +475,13 @@ jobs:
           done
           
           echo "Android environment validation completed"
+
+
+      - name: Clean Gradle cache
+        run: |
+         cd android
+         ./gradlew clean
+         rm -rf ~/.gradle/caches/
           
 
       - name: Building Android App 
