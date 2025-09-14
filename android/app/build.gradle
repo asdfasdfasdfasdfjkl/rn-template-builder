@@ -1,3 +1,102 @@
+// apply plugin: "com.android.application"
+// apply plugin: "org.jetbrains.kotlin.android"
+// apply plugin: "com.facebook.react"
+
+// react {
+//     autolinkLibrariesWithApp()
+// }
+
+// def enableProguardInReleaseBuilds = true
+// def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+
+// android {
+//     ndkVersion rootProject.ext.ndkVersion
+//     buildToolsVersion rootProject.ext.buildToolsVersion
+//     compileSdk rootProject.ext.compileSdkVersion
+
+//     namespace "com.awesomeproject"
+    
+//     defaultConfig {
+//         applicationId "com.awesomeproject"
+//         minSdkVersion rootProject.ext.minSdkVersion
+//         targetSdkVersion rootProject.ext.targetSdkVersion
+//         versionCode 1
+//         versionName "1.0.0"
+        
+//         // Remove density filtering - let APK splits handle this
+//         resConfigs "en"
+//     }
+    
+//     signingConfigs {
+//         debug {
+//             storeFile file('debug.keystore')
+//             storePassword 'android'
+//             keyAlias 'androiddebugkey'
+//             keyPassword 'android'
+//         }
+//     }
+    
+//     splits {
+//         abi {
+//             enable true
+//             reset()
+//             include "arm64-v8a", "armeabi-v7a"
+//             universalApk false
+//         }
+//         // Add density splits if you want separate APKs for different screen densities
+//         density {
+//             enable false  // Set to true if you want density splits
+//             reset()
+//             include "ldpi", "mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"
+//         }
+//     }
+    
+//     buildTypes {
+//         debug {
+//             signingConfig signingConfigs.debug
+//             minifyEnabled false
+//             shrinkResources false
+//         }
+//         release {
+//             signingConfig signingConfigs.debug
+//             minifyEnabled enableProguardInReleaseBuilds
+//             shrinkResources true
+//             zipAlignEnabled true
+            
+//             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+//         }
+//     }
+    
+//     compileOptions {
+//         sourceCompatibility JavaVersion.VERSION_1_8
+//         targetCompatibility JavaVersion.VERSION_1_8
+//     }
+    
+//     packaging {
+//         resources {
+//             pickFirsts += ['**/libc++_shared.so', '**/libjsc.so']
+//             excludes += [
+//                 'META-INF/DEPENDENCIES',
+//                 'META-INF/LICENSE',
+//                 'META-INF/LICENSE.txt',
+//                 'META-INF/NOTICE',
+//                 'META-INF/NOTICE.txt'
+//             ]
+//         }
+//     }
+// }
+
+// dependencies {
+//     implementation("com.facebook.react:react-android")
+
+//     if (hermesEnabled.toBoolean()) {
+//         implementation("com.facebook.react:hermes-android")
+//     } else {
+//         implementation jscFlavor
+//     }
+// }
+
+
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
@@ -7,24 +106,31 @@ react {
 }
 
 def enableProguardInReleaseBuilds = true
-def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.rn_project_template"
+    namespace "com.awesomeproject"
     
     defaultConfig {
-        applicationId "com.rn_project_template"
+        applicationId "com.awesomeproject"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode {{version_code}}
-        versionName "{{version_name}}"
+        versionCode 1
+        versionName "1.0.0"
         
-        // Remove density filtering - let APK splits handle this
+        // Only include English to reduce size
         resConfigs "en"
+        
+        // Include only essential architectures for universal APK
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
+        
+        // Use vector drawables for smaller size
+        vectorDrawables.useSupportLibrary = true
     }
     
     signingConfigs {
@@ -36,18 +142,13 @@ android {
         }
     }
     
+    // DISABLE splits to create universal APK
     splits {
         abi {
-            enable true
-            reset()
-            include "arm64-v8a", "armeabi-v7a"
-            universalApk false
+            enable false  // This ensures universal APK
         }
-        // Add density splits if you want separate APKs for different screen densities
         density {
-            enable false  // Set to true if you want density splits
-            reset()
-            include "ldpi", "mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"
+            enable false  // This ensures universal APK
         }
     }
     
@@ -56,14 +157,17 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled false
             shrinkResources false
+            debuggable true
         }
         release {
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             shrinkResources true
             zipAlignEnabled true
+            debuggable false
             
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            // Use optimized ProGuard
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
     
@@ -72,26 +176,52 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
     
+    // Optimize packaging for smaller size
     packaging {
         resources {
-            pickFirsts += ['**/libc++_shared.so', '**/libjsc.so']
+            pickFirsts += [
+                '**/libc++_shared.so', 
+                '**/libjsc.so',
+                '**/libhermes.so',
+                '**/libfbjni.so',
+                '**/libreactnativejni.so'
+            ]
             excludes += [
                 'META-INF/DEPENDENCIES',
                 'META-INF/LICENSE',
                 'META-INF/LICENSE.txt',
                 'META-INF/NOTICE',
-                'META-INF/NOTICE.txt'
+                'META-INF/NOTICE.txt',
+                'META-INF/ASL2.0',
+                'META-INF/LGPL2.1',
+                '**/kotlin/**',
+                '**/*.kotlin_metadata',
+                'META-INF/*.kotlin_module',
+                'META-INF/*kotlin*',
+                'okhttp3/internal/publicsuffix/NOTICE',
+                'META-INF/rxjava.properties',
+                'META-INF/proguard/androidx-*'
             ]
+        }
+    }
+    
+    // Ensure no bundle splits
+    bundle {
+        language {
+            enableSplit = false
+        }
+        density {
+            enableSplit = false  
+        }
+        abi {
+            enableSplit = false
         }
     }
 }
 
 dependencies {
     implementation("com.facebook.react:react-android")
-
-    if (hermesEnabled.toBoolean()) {
-        implementation("com.facebook.react:hermes-android")
-    } else {
-        implementation jscFlavor
-    }
+    
+    // Use Hermes for better performance and smaller size
+    implementation("com.facebook.react:hermes-android")
 }
