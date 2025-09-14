@@ -488,24 +488,25 @@ jobs:
         run: |
           cd android
           echo "Building Android app..."
-          echo "Build Type: ${{ env.BUILD_TYPE }}"
-          echo "Output Type: ${{ env.OUTPUT_TYPE }}"
           
-          # Set environment variables matching local build
-          export GRADLE_OPTS="-Xmx2g -Dorg.gradle.daemon=false"
+          # Optimize for CI environment
+          export GRADLE_OPTS="-Xmx3g -XX:MaxMetaspaceSize=512m -Dorg.gradle.daemon=false -Dorg.gradle.parallel=false"
+          export _JAVA_OPTIONS="-Xmx2g"
           
-          # Determine build arguments based on type and output
+          # Add memory monitoring
+          free -h
+          
           if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
             if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
               echo "Building release AAB..."
-              ./gradlew bundleRelease --stacktrace --info --no-daemon
+              ./gradlew bundleRelease --stacktrace --info --no-daemon --max-workers=2
             else
               echo "Building release APK..."
-              ./gradlew assembleRelease --stacktrace --info --no-daemon
+              ./gradlew assembleRelease --stacktrace --info --no-daemon --max-workers=2
             fi
           else
             echo "Building debug APK..."
-            ./gradlew assembleDebug --stacktrace --info --no-daemon
+            ./gradlew assembleDebug --stacktrace --info --no-daemon --max-workers=2
           fi
 
       - name: Verify and copy build outputs
