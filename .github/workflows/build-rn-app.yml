@@ -276,7 +276,7 @@ jobs:
           npm ci --legacy-peer-deps --no-audit --no-fund
           echo "Dependencies installed successfully"
 
-      - name: Restructure Java package
+      - name: Intalling JDK
         run: |
           echo "Restructuring Java package..."
           OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
@@ -341,7 +341,7 @@ jobs:
             find android/app/src/main/java -type d 2>/dev/null || echo "No java directory found"
           fi
 
-      - name: Fix cleartext traffic issue
+      - name: Android manifest updating
         run: |
           echo "Adding cleartext traffic permission to AndroidManifest.xml..."
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
@@ -359,13 +359,13 @@ jobs:
             echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
           fi
 
-      - name: Install Sharp for icon processing
+      - name: Installing additional dependency
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
           echo "Installing Sharp for icon processing..."
           npm install sharp --no-save
 
-      - name: Process custom app icon (matching local build)
+      - name: Processing your icon
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
           echo "Processing custom app icon..."
@@ -475,14 +475,9 @@ jobs:
           done
           
           echo "Android environment validation completed"
+          
 
-      - name: Clean previous builds
-        run: |
-          cd android
-          echo "Cleaning previous builds..."
-          ./gradlew clean --stacktrace
-
-      - name: Build Android App (matching local build logic)
+      - name: Building Android App 
         run: |
           cd android
           echo "Building Android app..."
@@ -584,14 +579,14 @@ jobs:
           
           echo "Build info created successfully"
 
-      - name: Configure AWS credentials
+      - name: Configure storage server 
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
-      - name: Upload to AWS S3
+      - name: Uploading your app to server
         id: upload_s3
         run: |
           echo "Uploading artifacts to AWS S3..."
@@ -687,7 +682,7 @@ jobs:
           fi
           echo "=================================="
 
-      - name: Upload artifacts (GitHub)
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
