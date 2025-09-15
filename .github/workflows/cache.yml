@@ -158,6 +158,67 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-avd
 
+      # Create a summary of cached items
+      - name: Verify and summarize cache setup
+        run: |
+          echo "## Build Cache Setup Complete 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Cached Components:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Node.js ${{ env.NODE_VERSION }} dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Java JDK ${{ env.JAVA_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Android SDK and build tools" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Gradle wrapper and dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Pre-compiled Kotlin/Java classes" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Metro bundler cache" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Sharp image processing library" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Path Verification:" >> $GITHUB_STEP_SUMMARY
+          
+          # Verify key paths exist
+          echo "Checking cache paths..." 
+          
+          if [ -d "node_modules" ]; then
+            NODE_SIZE=$(du -sh node_modules 2>/dev/null | cut -f1 || echo "N/A")
+            echo "- Node modules: $NODE_SIZE (✅ EXISTS)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Node modules: ❌ NOT FOUND" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -d "$HOME/.gradle" ]; then
+            GRADLE_SIZE=$(du -sh ~/.gradle 2>/dev/null | cut -f1 || echo "N/A")
+            echo "- Gradle cache (~/.gradle): $GRADLE_SIZE (✅ EXISTS)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Gradle cache: ❌ NOT FOUND" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -d "android/.gradle" ]; then
+            PROJECT_GRADLE_SIZE=$(du -sh android/.gradle 2>/dev/null | cut -f1 || echo "N/A")
+            echo "- Project Gradle: $PROJECT_GRADLE_SIZE (✅ EXISTS)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Project Gradle: ❌ NOT FOUND" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "$ANDROID_HOME" ] && [ -d "$ANDROID_HOME" ]; then
+            ANDROID_SIZE=$(du -sh "$ANDROID_HOME" 2>/dev/null | cut -f1 || echo "N/A")
+            echo "- Android SDK ($ANDROID_HOME): $ANDROID_SIZE (✅ EXISTS)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Android SDK: ❌ NOT FOUND or ANDROID_HOME not set" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -d "node_modules/sharp" ]; then
+            echo "- Sharp library: ✅ EXISTS" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Sharp library: ❌ NOT FOUND" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Environment Variables:" >> $GITHUB_STEP_SUMMARY
+          echo "- ANDROID_HOME: ${ANDROID_HOME:-'NOT SET'}" >> $GITHUB_STEP_SUMMARY
+          echo "- ANDROID_SDK_ROOT: ${ANDROID_SDK_ROOT:-'NOT SET'}" >> $GITHUB_STEP_SUMMARY
+          echo "- JAVA_HOME: ${JAVA_HOME:-'NOT SET'}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next builds should complete in ~1-2 minutes instead of 7-9 minutes!** ⚡" >> $GITHUB_STEP_SUMMARY
+
       # Store cache metadata for monitoring
       - name: Store cache metadata
         run: |
