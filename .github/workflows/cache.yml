@@ -121,19 +121,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-build-tools-
 
-      # Pre-compile and cache build artifacts
-      - name: Pre-compile project (Debug)
-        run: |
-          cd android
-          echo "Pre-compiling debug build..."
-          ./gradlew compileDebugJavaWithJavac compileDebugKotlin --no-daemon --stacktrace
-
-      - name: Pre-compile project (Release)
-        run: |
-          cd android
-          echo "Pre-compiling release build..."
-          ./gradlew compileReleaseJavaWithJavac compileReleaseKotlin --no-daemon --stacktrace
-
       # Cache React Native Metro bundler
       - name: Cache Metro bundler
         uses: actions/cache@v3
@@ -170,41 +157,6 @@ jobs:
           key: ${{ runner.os }}-android-avd
           restore-keys: |
             ${{ runner.os }}-android-avd
-
-      # Create a summary of cached items
-      - name: Cache Summary
-        run: |
-          echo "## Build Cache Setup Complete 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Cached Components:" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Node.js ${{ env.NODE_VERSION }} dependencies" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Java JDK ${{ env.JAVA_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Android SDK and build tools" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Gradle wrapper and dependencies" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Pre-compiled Kotlin/Java classes" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Metro bundler cache" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Sharp image processing library" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Cache Sizes:" >> $GITHUB_STEP_SUMMARY
-          
-          # Show cache directory sizes
-          if [ -d "node_modules" ]; then
-            NODE_SIZE=$(du -sh node_modules | cut -f1)
-            echo "- Node modules: $NODE_SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -d "~/.gradle" ]; then
-            GRADLE_SIZE=$(du -sh ~/.gradle 2>/dev/null | cut -f1 || echo "N/A")
-            echo "- Gradle cache: $GRADLE_SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -d "android/.gradle" ]; then
-            PROJECT_GRADLE_SIZE=$(du -sh android/.gradle | cut -f1)
-            echo "- Project Gradle: $PROJECT_GRADLE_SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Next builds should complete in ~1-2 minutes instead of 7-9 minutes!** ⚡" >> $GITHUB_STEP_SUMMARY
 
       # Store cache metadata for monitoring
       - name: Store cache metadata
