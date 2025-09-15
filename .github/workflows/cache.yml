@@ -1,0 +1,99 @@
+name: Cache Dependencies Only
+
+on:
+  workflow_dispatch: # Manual trigger only
+  # Optional: you can also add schedule if you want periodic cache updates
+  # schedule:
+  #   - cron: '0 0 * * 0' # Run weekly to keep caches fresh
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+
+jobs:
+  setup-caches:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+        
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+          android/.gradle
+        key: ${{ runner.os }}-gradle-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/app/build.gradle', 'android/build.gradle') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+      id: gradle-cache
+
+    - name: Cache Node modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.npm
+          node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+      id: node-cache
+
+    - name: Cache Android SDK
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ env.ANDROID_HOME }}
+          ~/.android
+        key: ${{ runner.os }}-android-sdk-34
+        restore-keys: |
+          ${{ runner.os }}-android-sdk-
+      id: android-sdk-cache
+
+    - name: Cache React Native Metro
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.metro
+          node_modules/.cache
+        key: ${{ runner.os }}-metro-${{ hashFiles('metro.config.js', 'package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-metro-
+      id: metro-cache
+
+    - name: Install dependencies (if cache miss)
+      run: npm ci
+      if: steps.node-cache.outputs.cache-hit != 'true'
+
+    - name: Setup Android SDK (if cache miss)
+      uses: android-actions/setup-android@v3
+      if: steps.android-sdk-cache.outputs.cache-hit != 'true'
+
+    - name: Download Gradle wrapper (if cache miss)
+      run: |
+        cd android
+        ./gradlew --version || true
+      if: steps.gradle-cache.outputs.cache-hit != 'true'
+
+    - name: Log cache status
+      run: |
+        echo "=== CACHE STATUS ==="
+        echo "Gradle cache hit: ${{ steps.gradle-cache.outputs.cache-hit }}"
+        echo "Node cache hit: ${{ steps.node-cache.outputs.cache-hit }}"
+        echo "Android SDK cache hit: ${{ steps.android-sdk-cache.outputs.cache-hit }}"
+        echo "Metro cache hit: ${{ steps.metro-cache.outputs.cache-hit }}"
+        echo "===================="
+
+    - name: Generate cache report
+      run: |
+        echo "Cache setup completed successfully!"
+        echo "Caches are now ready for your build CI/CD workflow"
+        echo "Run your build workflow within 7 days for cache availability"
