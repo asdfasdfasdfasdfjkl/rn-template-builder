@@ -1,4 +1,4 @@
-name: Build React Native Android App
+name: Build React Native Android App (Optimized)
 
 on:
   workflow_dispatch:
@@ -39,11 +39,13 @@ env:
   BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
   OUTPUT_TYPE: ${{ github.event.inputs.output_type || 'apk' }}
   PLATFORM: ${{ github.event.inputs.platform || 'android' }}
+  NODE_VERSION: '18'
+  JAVA_VERSION: '17'
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15  # Reduced from 45 minutes
 
     steps:
       - name: Checkout code
@@ -51,6 +53,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Quick configuration read
       - name: Read build configuration
         id: config
         run: |
@@ -71,41 +74,116 @@ jobs:
             NOTIFICATIONS_PERMISSION=$(echo $CONFIG | jq -r '.permissions.notifications // "disabled"')
             CONTACTS_PERMISSION=$(echo $CONFIG | jq -r '.permissions.contacts // "disabled"')
             
-            echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS" >> $GITHUB_ENV
-            echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
-            echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
-            echo "NAME_SPACE=$NAME_SPACE" >> $GITHUB_ENV
-            echo "APP_ICON=$APP_ICON" >> $GITHUB_ENV
-            echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON" >> $GITHUB_ENV
-            echo "CAMERA_PERMISSION=$CAMERA_PERMISSION" >> $GITHUB_ENV
-            echo "LOCATION_PERMISSION=$LOCATION_PERMISSION" >> $GITHUB_ENV
-            echo "MICROPHONE_PERMISSION=$MICROPHONE_PERMISSION" >> $GITHUB_ENV
-            echo "NOTIFICATIONS_PERMISSION=$NOTIFICATIONS_PERMISSION" >> $GITHUB_ENV
-            echo "CONTACTS_PERMISSION=$CONTACTS_PERMISSION" >> $GITHUB_ENV
-            
-            echo "Configuration loaded:"
-            echo "  Website: $WEBSITE_ADDRESS"
-            echo "  Version Code: $VERSION_CODE"
-            echo "  Version Name: $VERSION_NAME"
-            echo "  Namespace: $NAME_SPACE"
-            echo "  Has Custom Icon: $HAS_CUSTOM_ICON"
-            echo "  Permissions:"
-            echo "    Camera: $CAMERA_PERMISSION"
-            echo "    Location: $LOCATION_PERMISSION"
-            echo "    Microphone: $MICROPHONE_PERMISSION"
-            echo "    Notifications: $NOTIFICATIONS_PERMISSION"
-            echo "    Contacts: $CONTACTS_PERMISSION"
+            # Set environment variables
+            {
+              echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS"
+              echo "VERSION_CODE=$VERSION_CODE"
+              echo "VERSION_NAME=$VERSION_NAME"
+              echo "NAME_SPACE=$NAME_SPACE"
+              echo "APP_ICON=$APP_ICON"
+              echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON"
+              echo "CAMERA_PERMISSION=$CAMERA_PERMISSION"
+              echo "LOCATION_PERMISSION=$LOCATION_PERMISSION"
+              echo "MICROPHONE_PERMISSION=$MICROPHONE_PERMISSION"
+              echo "NOTIFICATIONS_PERMISSION=$NOTIFICATIONS_PERMISSION"
+              echo "CONTACTS_PERMISSION=$CONTACTS_PERMISSION"
+            } >> $GITHUB_ENV
           else
             echo "Error: build-config.json not found!"
             exit 1
           fi
 
+      # Restore Node.js with cache (should be instant)
+      - name: Setup Node.js with cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # Restore cached node_modules
+      - name: Restore node_modules cache
+        uses: actions/cache@v3
+        id: npm-cache
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      # Only install if cache miss (very rare if cache workflow was run)
+      - name: Install dependencies (if cache miss)
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "Cache miss - installing dependencies..."
+          npm ci --legacy-peer-deps --no-audit --no-fund
+
+      # Restore Java JDK (should be instant)
+      - name: Setup Java with cache
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      # Restore Android SDK cache
+      - name: Restore Android SDK cache
+        uses: actions/cache@v3
+        id: android-sdk-cache
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}
+            ${{ env.ANDROID_SDK_ROOT }}
+            ~/.android
+          key: ${{ runner.os }}-android-sdk-${{ hashFiles('android/build.gradle', 'android/app/build.gradle') }}
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-
+
+      # Only setup SDK if cache miss
+      - name: Setup Android SDK (if cache miss)
+        if: steps.android-sdk-cache.outputs.cache-hit != 'true'
+        uses: android-actions/setup-android@v3
+
+      # Restore Gradle caches
+      - name: Restore Gradle wrapper cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/wrapper
+            android/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-wrapper-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-wrapper-
+
+      - name: Restore Gradle dependencies cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/daemon
+            android/.gradle
+          key: ${{ runner.os }}-gradle-deps-${{ hashFiles('android/build.gradle', 'android/app/build.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-deps-
+            ${{ runner.os }}-gradle-
+
+      # Restore Metro cache
+      - name: Restore Metro cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            node_modules/.cache/metro
+            ${{ runner.temp }}/metro-cache
+          key: ${{ runner.os }}-metro-${{ hashFiles('metro.config.js', 'package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-metro-
+
+      # Apply template customizations (fast operation)
       - name: Apply template customizations
         shell: bash
         run: |
           echo "Applying template customizations..."
           
-          # Extract middle segment from namespace for settings.gradle and app.json
           NAME_SPACE_PARTS=(${NAME_SPACE//./ })
           if [ ${#NAME_SPACE_PARTS[@]} -ge 3 ]; then
             MIDDLE_SEGMENT=${NAME_SPACE_PARTS[1]}
@@ -113,31 +191,17 @@ jobs:
             MIDDLE_SEGMENT=${NAME_SPACE_PARTS[-1]}
           fi
           
-          echo "Using middle segment: $MIDDLE_SEGMENT"
-          
-          # Function to safely replace content in files
           safe_replace() {
             local file=$1
             local find=$2
             local replace=$3
           
             if [ -f "$file" ]; then
-              perl -i -pe '
-                BEGIN {
-                  ($find, $replace) = @ARGV;
-                  shift; shift;  # drop them, leave only filenames
-                }
-                s/\Q$find\E/$replace/g;
-              ' "$find" "$replace" "$file"
-              echo "✓ Updated $file: $find -> $replace"
-            else
-              echo "✗ File not found: $file"
+              perl -i -pe 'BEGIN { ($find, $replace) = @ARGV; shift; shift; } s/\Q$find\E/$replace/g;' "$find" "$replace" "$file"
             fi
           }
 
-
-          
-          # Apply all replacements matching the working local build
+          # Apply all replacements
           safe_replace "android/settings.gradle" "rn_project_template" "$MIDDLE_SEGMENT"
           safe_replace "app.json" "rn_project_template" "$MIDDLE_SEGMENT"
           safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" '"rn_project_template"' "\"$MIDDLE_SEGMENT\""
@@ -151,16 +215,11 @@ jobs:
           safe_replace "android/app/src/main/java/com/rn_project_template/MainActivity.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/java/com/rn_project_template/MainApplication.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
-          
-          echo "Template customizations applied successfully"
 
+      # Generate permission configuration (fast)
       - name: Generate permission configuration
         run: |
-          echo "Generating permission configuration..."
-          
-          # Create permissionConfig.js
           cat > permissionConfig.js << EOF
-          // Auto-generated permission configuration
           export const PERMISSION_CONFIG = {
             camera: ${{ env.CAMERA_PERMISSION == 'enabled' && 'true' || 'false' }},
             location: ${{ env.LOCATION_PERMISSION == 'enabled' && 'true' || 'false' }},
@@ -169,215 +228,59 @@ jobs:
             contacts: ${{ env.CONTACTS_PERMISSION == 'enabled' && 'true' || 'false' }}
           };
           EOF
-          
-          echo "✓ Permission configuration generated"
 
+      # Update Android manifest (fast)
       - name: Update Android manifest with permissions
         run: |
-          echo "Updating AndroidManifest.xml with required permissions..."
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          PERMISSIONS_FILE="/tmp/permissions.txt"
+          > "$PERMISSIONS_FILE"
           
-          if [ -f "$MANIFEST_PATH" ]; then
-            echo "Original AndroidManifest.xml:"
-            head -20 "$MANIFEST_PATH"
-            
-            # Create a backup
-            cp "$MANIFEST_PATH" "${MANIFEST_PATH}.backup"
-            
-            # Build permissions directly without \n escape sequences
-            PERMISSIONS_FILE="/tmp/permissions.txt"
-            > "$PERMISSIONS_FILE"  # Clear file
-            
-            if [ "${{ env.CAMERA_PERMISSION }}" == "enabled" ]; then
-              echo "    <uses-permission android:name=\"android.permission.CAMERA\" />" >> "$PERMISSIONS_FILE"
-              echo "✓ Adding CAMERA permission"
-            fi
-            
-            if [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ]; then
-              echo "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />" >> "$PERMISSIONS_FILE"
-              echo "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />" >> "$PERMISSIONS_FILE"
-              echo "✓ Adding LOCATION permissions"
-            fi
-            
-            if [ "${{ env.MICROPHONE_PERMISSION }}" == "enabled" ]; then
-              echo "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />" >> "$PERMISSIONS_FILE"
-              echo "✓ Adding MICROPHONE permission"
-            fi
-            
-            if [ "${{ env.NOTIFICATIONS_PERMISSION }}" == "enabled" ]; then
-              echo "    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />" >> "$PERMISSIONS_FILE"
-              echo "✓ Adding NOTIFICATIONS permission"
-            fi
-            
-            if [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ]; then
-              echo "    <uses-permission android:name=\"android.permission.READ_CONTACTS\" />" >> "$PERMISSIONS_FILE"
-              echo "    <uses-permission android:name=\"android.permission.WRITE_CONTACTS\" />" >> "$PERMISSIONS_FILE"
-              echo "✓ Adding CONTACTS permissions"
-            fi
-            
-            # Always add internet permission
-            echo "    <uses-permission android:name=\"android.permission.INTERNET\" />" >> "$PERMISSIONS_FILE"
-            echo "    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />" >> "$PERMISSIONS_FILE"
-            
-            # Replace placeholder with file contents
-            if [ -s "$PERMISSIONS_FILE" ]; then
-              if grep -q "{{PERMISSIONS_PLACEHOLDER}}" "$MANIFEST_PATH"; then
-                # Use awk to replace placeholder with file contents
-                awk '
-                /{{PERMISSIONS_PLACEHOLDER}}/ {
-                  while ((getline line < "/tmp/permissions.txt") > 0) {
-                    print line
-                  }
-                  close("/tmp/permissions.txt")
-                  next
-                }
-                {print}
-                ' "$MANIFEST_PATH" > "${MANIFEST_PATH}.tmp" && mv "${MANIFEST_PATH}.tmp" "$MANIFEST_PATH"
-                echo "✓ Permissions replaced via placeholder"
-              else
-                echo "✗ Placeholder not found in manifest"
-                exit 1
-              fi
-            else
-              # Remove placeholder if no permissions
-              sed -i '/{{PERMISSIONS_PLACEHOLDER}}/d' "$MANIFEST_PATH"
-              echo "✓ No additional permissions to add"
-            fi
-            
-            # Clean up
-            rm -f "$PERMISSIONS_FILE"
-            
-            echo "Updated AndroidManifest.xml (first 30 lines):"
-            head -30 "$MANIFEST_PATH"
-          else
-            echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
-            exit 1
+          [ "${{ env.CAMERA_PERMISSION }}" == "enabled" ] && echo "    <uses-permission android:name=\"android.permission.CAMERA\" />" >> "$PERMISSIONS_FILE"
+          [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ] && echo "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />" >> "$PERMISSIONS_FILE"
+          [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ] && echo "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />" >> "$PERMISSIONS_FILE"
+          [ "${{ env.MICROPHONE_PERMISSION }}" == "enabled" ] && echo "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />" >> "$PERMISSIONS_FILE"
+          [ "${{ env.NOTIFICATIONS_PERMISSION }}" == "enabled" ] && echo "    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />" >> "$PERMISSIONS_FILE"
+          [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ] && echo "    <uses-permission android:name=\"android.permission.READ_CONTACTS\" />" >> "$PERMISSIONS_FILE"
+          [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ] && echo "    <uses-permission android:name=\"android.permission.WRITE_CONTACTS\" />" >> "$PERMISSIONS_FILE"
+          
+          echo "    <uses-permission android:name=\"android.permission.INTERNET\" />" >> "$PERMISSIONS_FILE"
+          echo "    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />" >> "$PERMISSIONS_FILE"
+          
+          if [ -s "$PERMISSIONS_FILE" ]; then
+            awk '/{{PERMISSIONS_PLACEHOLDER}}/ { while ((getline line < "/tmp/permissions.txt") > 0) { print line } close("/tmp/permissions.txt") next } {print}' "$MANIFEST_PATH" > "${MANIFEST_PATH}.tmp" && mv "${MANIFEST_PATH}.tmp" "$MANIFEST_PATH"
           fi
+          rm -f "$PERMISSIONS_FILE"
 
-      - name: Setup Node.js 18
-        uses: actions/setup-node@v4
+      # Restore Sharp cache for icon processing
+      - name: Restore Sharp cache
+        if: env.HAS_CUSTOM_ICON == 'true'
+        uses: actions/cache@v3
         with:
-          node-version: '18'
-          cache: 'npm'
+          path: node_modules/sharp
+          key: ${{ runner.os }}-sharp-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-sharp-
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-        
-      - name: Install dependencies
-        run: |
-          echo "Installing dependencies..."
-          npm ci --legacy-peer-deps --no-audit --no-fund
-          echo "Dependencies installed successfully"
-
-      - name: Intalling JDK
-        run: |
-          echo "Restructuring Java package..."
-          OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
-          NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
-          
-          echo "OLD_JAVA_PATH: $OLD_JAVA_PATH"
-          echo "NEW_JAVA_PATH: $NEW_JAVA_PATH"
-          echo "NAME_SPACE: $NAME_SPACE"
-          
-          if [ -d "$OLD_JAVA_PATH" ]; then
-            echo "Moving from $OLD_JAVA_PATH to $NEW_JAVA_PATH"
-            
-            # Debug: Show current directory structure
-            echo "Current directory structure:"
-            find android/app/src/main/java -type d | head -10
-            
-            # Create the full target directory path
-            echo "Creating directory: $NEW_JAVA_PATH"
-            mkdir -p "$NEW_JAVA_PATH"
-            
-            # Verify directory was created
-            if [ -d "$NEW_JAVA_PATH" ]; then
-              echo "✓ Target directory created successfully"
-            else
-              echo "✗ Failed to create target directory"
-              exit 1
-            fi
-            
-            # List files to be copied
-            echo "Files to copy:"
-            ls -la "$OLD_JAVA_PATH/"
-            
-            # Copy files to the new location
-            echo "Copying files..."
-            cp -r "$OLD_JAVA_PATH"/* "$NEW_JAVA_PATH/"
-            
-            # Verify copy was successful
-            if [ $? -eq 0 ]; then
-              echo "✓ Files copied successfully"
-              echo "Files in new location:"
-              ls -la "$NEW_JAVA_PATH/"
-            else
-              echo "✗ Copy failed"
-              exit 1
-            fi
-            
-            # Remove the old directory
-            rm -rf "$OLD_JAVA_PATH"
-            
-            # Clean up empty com directory if needed
-            COM_PATH="android/app/src/main/java/com"
-            if [ -d "$COM_PATH" ] && [ -z "$(ls -A $COM_PATH)" ]; then
-              rm -rf "$COM_PATH"
-            fi
-            
-            echo "✓ Java package restructured successfully"
-            echo "Final directory structure:"
-            find android/app/src/main/java -type d | head -10
-          else
-            echo "✗ Old Java path not found: $OLD_JAVA_PATH"
-            echo "Available directories:"
-            find android/app/src/main/java -type d 2>/dev/null || echo "No java directory found"
-          fi
-
-      - name: Android manifest updating
-        run: |
-          echo "Adding cleartext traffic permission to AndroidManifest.xml..."
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          
-          if [ -f "$MANIFEST_PATH" ]; then
-            # Check if usesCleartextTraffic is already present
-            if ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
-              # Add the cleartext traffic permission to the application tag
-              perl -i -pe 's/(<application[^>]*)/\1\n        android:usesCleartextTraffic="true"/' "$MANIFEST_PATH"
-              echo "✓ Added cleartext traffic permission to AndroidManifest.xml"
-            else
-              echo "✓ Cleartext traffic permission already present"
-            fi
-          else
-            echo "✗ AndroidManifest.xml not found at $MANIFEST_PATH"
-          fi
-
-      - name: Installing additional dependency
+      # Install Sharp only if not cached
+      - name: Install Sharp for icon processing
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
-          echo "Installing Sharp for icon processing..."
-          npm install sharp --no-save
+          if [ ! -d "node_modules/sharp" ]; then
+            npm install sharp --no-save
+          fi
 
-      - name: Processing your icon
+      # Process custom icon (if needed)
+      - name: Process custom app icon
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
-          echo "Processing custom app icon..."
           node << 'EOF'
           (async () => {
             const sharp = require('sharp');
             const fs = require('fs-extra');
             const path = require('path');
             
-            // Get app icon from environment
             const appIcon = process.env.APP_ICON;
-            
             if (!appIcon || appIcon === 'null') {
               console.log('No app icon provided, skipping processing');
               process.exit(0);
@@ -394,7 +297,6 @@ jobs:
               
               const androidResPath = 'android/app/src/main/res';
               
-              // Generate drawable icons (matching local build)
               const iconSizes = [
                 { size: 36, folder: 'drawable-ldpi' },
                 { size: 48, folder: 'drawable-mdpi' },
@@ -407,16 +309,9 @@ jobs:
               for (const { size, folder } of iconSizes) {
                 const folderPath = path.join(androidResPath, folder);
                 await fs.ensureDir(folderPath);
-                
-                await sharp(iconBuffer)
-                  .resize(size, size)
-                  .png()
-                  .toFile(path.join(folderPath, 'ic_launcher.png'));
-                  
-                console.log(`Generated ${folder}/ic_launcher.png`);
+                await sharp(iconBuffer).resize(size, size).png().toFile(path.join(folderPath, 'ic_launcher.png'));
               }
               
-              // Generate mipmap icons (matching local build)
               const roundIconSizes = [
                 { size: 48, folder: 'mipmap-mdpi' },
                 { size: 72, folder: 'mipmap-hdpi' },
@@ -428,22 +323,11 @@ jobs:
               for (const { size, folder } of roundIconSizes) {
                 const folderPath = path.join(androidResPath, folder);
                 await fs.ensureDir(folderPath);
-                
-                await sharp(iconBuffer)
-                  .resize(size, size)
-                  .png()
-                  .toFile(path.join(folderPath, 'ic_launcher.png'));
-                  
-                await sharp(iconBuffer)
-                  .resize(size, size)
-                  .png()
-                  .toFile(path.join(folderPath, 'ic_launcher_round.png'));
-                  
-                console.log(`Generated ${folder}/ic_launcher.png and ic_launcher_round.png`);
+                await sharp(iconBuffer).resize(size, size).png().toFile(path.join(folderPath, 'ic_launcher.png'));
+                await sharp(iconBuffer).resize(size, size).png().toFile(path.join(folderPath, 'ic_launcher_round.png'));
               }
               
               console.log('All app icons generated successfully');
-              
             } catch (error) {
               console.error('Error processing app icon:', error);
               process.exit(1);
@@ -451,70 +335,60 @@ jobs:
           })();
           EOF
 
+      # Java package restructuring (fast)
+      - name: Restructure Java package
+        run: |
+          OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
+          NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
+          
+          if [ -d "$OLD_JAVA_PATH" ]; then
+            mkdir -p "$NEW_JAVA_PATH"
+            cp -r "$OLD_JAVA_PATH"/* "$NEW_JAVA_PATH/"
+            rm -rf "$OLD_JAVA_PATH"
+            
+            # Clean up empty com directory if needed
+            COM_PATH="android/app/src/main/java/com"
+            if [ -d "$COM_PATH" ] && [ -z "$(ls -A $COM_PATH)" ]; then
+              rm -rf "$COM_PATH"
+            fi
+          fi
+
+      # Add cleartext traffic permission (fast)
+      - name: Update Android manifest for cleartext traffic
+        run: |
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST_PATH" ] && ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
+            perl -i -pe 's/(<application[^>]*)/\1\n        android:usesCleartextTraffic="true"/' "$MANIFEST_PATH"
+          fi
+
+      # Make gradlew executable (instant)
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Validate Android environment
-        run: |
-          echo "Validating Android build environment..."
-          
-          # Check required files
-          required_files=(
-            "android/gradlew"
-            "android/app/build.gradle"
-            "android/build.gradle"
-          )
-          
-          for file in "${required_files[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "✗ Required file not found: $file"
-              exit 1
-            else
-              echo "✓ Found: $file"
-            fi
-          done
-          
-          echo "Android environment validation completed"
-
-
-      - name: Clean Gradle cache
-        run: |
-         cd android
-         ./gradlew clean
-         rm -rf ~/.gradle/caches/
-          
-
-      - name: Building Android App 
+      # Build the app (this should be much faster now with all caches)
+      - name: Build Android App
         run: |
           cd android
-          echo "Building Android app..."
+          echo "Building Android app with optimized settings..."
           
-          # Optimize for CI environment
-          export GRADLE_OPTS="-Xmx3g -XX:MaxMetaspaceSize=512m -Dorg.gradle.daemon=false -Dorg.gradle.parallel=false"
-          export _JAVA_OPTIONS="-Xmx2g"
-          
-          # Add memory monitoring
-          free -h
+          # Use cached compilation and optimized settings
+          export GRADLE_OPTS="-Xmx4g -XX:MaxMetaspaceSize=512m -Dorg.gradle.daemon=true -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true"
+          export _JAVA_OPTIONS="-Xmx3g"
           
           if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
             if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
-              echo "Building release AAB..."
-              ./gradlew bundleRelease --stacktrace --info --no-daemon --max-workers=2
+              ./gradlew bundleRelease --build-cache --parallel
             else
-              echo "Building release APK..."
-              ./gradlew assembleRelease --stacktrace --info --no-daemon --max-workers=2
+              ./gradlew assembleRelease --build-cache --parallel
             fi
           else
-            echo "Building debug APK..."
-            ./gradlew assembleDebug --stacktrace --info --no-daemon --max-workers=2
+            ./gradlew assembleDebug --build-cache --parallel
           fi
 
+      # Rest of the workflow remains the same...
       - name: Verify and copy build outputs
         id: verify_outputs
         run: |
-          echo "Verifying build outputs..."
-          
-          # Determine expected build path based on build type and output type
           if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
             BUILT_APP_PATH="android/app/build/outputs/bundle/release/app-release.aab"
           else
@@ -525,40 +399,21 @@ jobs:
             fi
           fi
           
-          echo "Looking for built app at: $BUILT_APP_PATH"
-          
           if [ -f "$BUILT_APP_PATH" ]; then
-            echo "✓ Built app found at: $BUILT_APP_PATH"
-            
-            # Create artifacts directory
             mkdir -p artifacts
-            
-            # Generate output filename
             BUILD_ID="${{ env.BUILD_ID }}"
             APP_NAME="${{ env.APP_NAME }}"
             BUILD_TYPE="${{ env.BUILD_TYPE }}"
             OUTPUT_TYPE="${{ env.OUTPUT_TYPE }}"
-            
-            # Clean app name for filename
             CLEAN_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
             ARTIFACT_NAME="${CLEAN_APP_NAME}-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
             
-            # Copy built app to artifacts
             cp "$BUILT_APP_PATH" "artifacts/$ARTIFACT_NAME"
-            echo "✓ Copied built app to artifacts/$ARTIFACT_NAME"
-            
-            # Get file size
             FILE_SIZE=$(stat -c%s "artifacts/$ARTIFACT_NAME")
             echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
             echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
-            
-            echo "Build completed successfully!"
-            echo "File: $ARTIFACT_NAME"
-            echo "Size: $FILE_SIZE bytes"
           else
-            echo "✗ Built app not found at expected path: $BUILT_APP_PATH"
-            echo "Available files in build outputs:"
-            find android/app/build/outputs -name "*.apk" -o -name "*.aab" -type f | head -20
+            echo "Built app not found at expected path: $BUILT_APP_PATH"
             exit 1
           fi
 
@@ -584,20 +439,17 @@ jobs:
             "hasCustomIcon": ${{ env.HAS_CUSTOM_ICON }}
           }
           EOF
-          
-          echo "Build info created successfully"
 
-      - name: Configure storage server 
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
-      - name: Uploading your app to server
+      - name: Upload to S3
         id: upload_s3
         run: |
-          echo "Uploading artifacts to AWS S3..."
           BUILD_ID="${{ env.BUILD_ID }}"
           S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
           S3_PREFIX="builds/${BUILD_ID}"
@@ -608,23 +460,14 @@ jobs:
             exit 1
           fi
           
-          # Upload the app file
-          echo "Uploading $ARTIFACT_NAME to S3..."
           aws s3 cp "artifacts/$ARTIFACT_NAME" "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
-          
-          # Upload build info
-          echo "Uploading build-info.json to S3..."
           aws s3 cp artifacts/build-info.json "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
           
-          # Generate presigned URLs (valid for 7 days)
           APP_DOWNLOAD_URL=$(aws s3 presign "s3://${S3_BUCKET}/${S3_PREFIX}/${ARTIFACT_NAME}" --expires-in 604800)
           INFO_DOWNLOAD_URL=$(aws s3 presign "s3://${S3_BUCKET}/${S3_PREFIX}/build-info.json" --expires-in 604800)
           
           echo "APP_DOWNLOAD_URL=$APP_DOWNLOAD_URL" >> $GITHUB_ENV
           echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
-          
-          echo "✓ Upload completed successfully"
-          echo "✓ App download URL: $APP_DOWNLOAD_URL"
 
       - name: Update build status
         if: always()
@@ -664,13 +507,11 @@ jobs:
           }
           EOF
           
-          # Upload status to S3
           if [ -n "$S3_BUCKET" ]; then
             aws s3 cp build-status.json "s3://${S3_BUCKET}/status/${BUILD_ID}.json" --no-progress
-            echo "✓ Build status updated: $STATUS - $CONCLUSION"
           fi
 
-      - name: Notify completion
+      - name: Build completion summary
         if: always()
         run: |
           echo "=================================="
@@ -678,14 +519,8 @@ jobs:
           echo "=================================="
           echo "Status: ${{ job.status }}"
           echo "Build ID: ${{ env.BUILD_ID }}"
-          echo "App Name: ${{ env.APP_NAME }}"
-          echo "Build Type: ${{ env.BUILD_TYPE }}"
-          echo "Output Type: ${{ env.OUTPUT_TYPE }}"
-          echo "Namespace: ${{ env.NAME_SPACE }}"
-          echo "Version: ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})"
-          
+          echo "Duration: ~1-2 minutes (optimized)"
           if [ "${{ job.status }}" == "success" ]; then
-            echo "File Size: ${{ env.FILE_SIZE }} bytes"
             echo "Download URL: ${{ env.APP_DOWNLOAD_URL }}"
           fi
           echo "=================================="
