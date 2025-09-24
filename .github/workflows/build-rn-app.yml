@@ -1,4 +1,4 @@
-name: Build React Native Android App (Optimized)
+name: Build React Native Android App
 
 on:
   workflow_dispatch:
@@ -41,20 +41,21 @@ env:
   PLATFORM: ${{ github.event.inputs.platform || 'android' }}
   NODE_VERSION: '18'
   JAVA_VERSION: '17'
+  ANDROID_HOME: /opt/android-sdk-linux
+  ANDROID_SDK_ROOT: /opt/android-sdk-linux
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Reduced from 45 minutes
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout code
+      - name: "📥 Checkout Repository"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Quick configuration read
-      - name: Read build configuration
+      - name: "📋 Read Build Configuration"
         id: config
         run: |
           echo "Loading build configuration..."
@@ -93,83 +94,75 @@ jobs:
             exit 1
           fi
 
-      # Restore Node.js with cache (should be instant)
-      - name: Setup Node.js with cache
+      - name: "⚙️ Setup Node.js with Cache Restore"
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
 
-      # Restore cached node_modules
-      - name: Restore node_modules cache
-        uses: actions/cache@v3
+      - name: "📦 Restore NPM Dependencies from Cache"
+        uses: actions/cache@v4
         id: npm-cache
         with:
           path: |
-            node_modules
             ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+            node_modules
+          key: ${{ runner.os }}-npm-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
+            ${{ runner.os }}-npm-${{ env.NODE_VERSION }}-
             ${{ runner.os }}-npm-
 
-      # Only install if cache miss (very rare if cache workflow was run)
-      - name: Install dependencies (if cache miss)
+      - name: "📦 Install Dependencies (Cache Miss Fallback)"
         if: steps.npm-cache.outputs.cache-hit != 'true'
         run: |
-          echo "Cache miss - installing dependencies..."
+          echo "⚠️  NPM cache miss - installing dependencies..."
           npm ci --legacy-peer-deps --no-audit --no-fund
 
-      # Restore Java JDK (should be instant)
-      - name: Setup Java with cache
+      - name: "☕ Setup Java JDK"
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
 
-      # Restore Android SDK cache
-      - name: Restore Android SDK cache
-        uses: actions/cache@v3
+      - name: "📦 Restore Android SDK from Cache"
+        uses: actions/cache@v4
         id: android-sdk-cache
         with:
           path: |
             ${{ env.ANDROID_HOME }}
-            ${{ env.ANDROID_SDK_ROOT }}
             ~/.android
-          key: ${{ runner.os }}-android-sdk-${{ hashFiles('android/build.gradle', 'android/app/build.gradle') }}
+          key: ${{ runner.os }}-android-sdk-${{ env.JAVA_VERSION }}-${{ hashFiles('android/build.gradle', 'android/app/build.gradle') }}
           restore-keys: |
+            ${{ runner.os }}-android-sdk-${{ env.JAVA_VERSION }}-
             ${{ runner.os }}-android-sdk-
 
-      # Only setup SDK if cache miss
-      - name: Setup Android SDK (if cache miss)
+      - name: "🤖 Setup Android SDK (Cache Miss Fallback)"
         if: steps.android-sdk-cache.outputs.cache-hit != 'true'
         uses: android-actions/setup-android@v3
 
-      # Restore Gradle caches
-      - name: Restore Gradle wrapper cache
-        uses: actions/cache@v3
+      - name: "📦 Restore Gradle Wrapper from Cache"
+        uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/wrapper
-            android/.gradle/wrapper
           key: ${{ runner.os }}-gradle-wrapper-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-wrapper-
 
-      - name: Restore Gradle dependencies cache
-        uses: actions/cache@v3
+      - name: "📦 Restore Gradle Dependencies from Cache"
+        uses: actions/cache@v4
+        id: gradle-cache
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/daemon
             android/.gradle
-          key: ${{ runner.os }}-gradle-deps-${{ hashFiles('android/build.gradle', 'android/app/build.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-deps-${{ env.JAVA_VERSION }}-${{ hashFiles('android/build.gradle', 'android/app/build.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
+            ${{ runner.os }}-gradle-deps-${{ env.JAVA_VERSION }}-
             ${{ runner.os }}-gradle-deps-
-            ${{ runner.os }}-gradle-
 
-      # Restore Metro cache
-      - name: Restore Metro cache
-        uses: actions/cache@v3
+      - name: "📦 Restore Metro Cache"
+        uses: actions/cache@v4
         with:
           path: |
             node_modules/.cache/metro
@@ -178,8 +171,44 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-metro-
 
-      # Apply template customizations (fast operation)
-      - name: Apply template customizations
+      - name: "📦 Restore React Native Components from Cache"
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules/@react-native-community
+            node_modules/react-native
+          key: ${{ runner.os }}-rn-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-rn-
+
+      - name: "📦 Restore Native Dependencies from Cache"
+        uses: actions/cache@v4
+        id: native-deps-cache
+        with:
+          path: |
+            node_modules/sharp
+            node_modules/@img
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-native-deps-
+
+      - name: "🖼️ Install Sharp (Cache Miss Fallback)"
+        if: env.HAS_CUSTOM_ICON == 'true' && steps.native-deps-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "⚠️  Sharp cache miss - installing..."
+          npm install sharp --no-save
+
+      - name: "📦 Restore Kotlin Compiler Cache"
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.konan
+            ~/.kotlin
+          key: ${{ runner.os }}-kotlin-${{ hashFiles('android/build.gradle', 'android/app/build.gradle') }}
+          restore-keys: |
+            ${{ runner.os }}-kotlin-
+
+      - name: "🔧 Apply Template Customizations"
         shell: bash
         run: |
           echo "Applying template customizations..."
@@ -216,8 +245,7 @@ jobs:
           safe_replace "android/app/src/main/java/com/rn_project_template/MainApplication.kt" "com.rn_project_template" "$NAME_SPACE"
           safe_replace "android/app/src/main/AndroidManifest.xml" "{{name_space}}" "$NAME_SPACE"
 
-      # Generate permission configuration (fast)
-      - name: Generate permission configuration
+      - name: "🔐 Generate Permission Configuration"
         run: |
           cat > permissionConfig.js << EOF
           export const PERMISSION_CONFIG = {
@@ -229,8 +257,7 @@ jobs:
           };
           EOF
 
-      # Update Android manifest (fast)
-      - name: Update Android manifest with permissions
+      - name: "📝 Update Android Manifest with Permissions"
         run: |
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
           PERMISSIONS_FILE="/tmp/permissions.txt"
@@ -252,26 +279,7 @@ jobs:
           fi
           rm -f "$PERMISSIONS_FILE"
 
-      # Restore Sharp cache for icon processing
-      - name: Restore Sharp cache
-        if: env.HAS_CUSTOM_ICON == 'true'
-        uses: actions/cache@v3
-        with:
-          path: node_modules/sharp
-          key: ${{ runner.os }}-sharp-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-sharp-
-
-      # Install Sharp only if not cached
-      - name: Install Sharp for icon processing
-        if: env.HAS_CUSTOM_ICON == 'true'
-        run: |
-          if [ ! -d "node_modules/sharp" ]; then
-            npm install sharp --no-save
-          fi
-
-      # Process custom icon (if needed)
-      - name: Process custom app icon
+      - name: "🖼️ Process Custom App Icon"
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
           node << 'EOF'
@@ -335,8 +343,7 @@ jobs:
           })();
           EOF
 
-      # Java package restructuring (fast)
-      - name: Restructure Java package
+      - name: "📁 Restructure Java Package"
         run: |
           OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
           NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
@@ -353,23 +360,20 @@ jobs:
             fi
           fi
 
-      # Add cleartext traffic permission (fast)
-      - name: Update Android manifest for cleartext traffic
+      - name: "🌐 Enable Cleartext Traffic"
         run: |
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST_PATH" ] && ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
             perl -i -pe 's/(<application[^>]*)/\1\n        android:usesCleartextTraffic="true"/' "$MANIFEST_PATH"
           fi
 
-      # Make gradlew executable (instant)
-      - name: Make gradlew executable
+      - name: "🔧 Make Gradlew Executable"
         run: chmod +x android/gradlew
 
-      # Build the app (this should be much faster now with all caches)
-      - name: Build Android App
+      - name: "🏗️ Build Android App"
         run: |
           cd android
-          echo "Building Android app with optimized settings..."
+          echo "Building Android app with cached dependencies..."
           
           # Use cached compilation and optimized settings
           export GRADLE_OPTS="-Xmx4g -XX:MaxMetaspaceSize=512m -Dorg.gradle.daemon=true -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true"
@@ -377,16 +381,15 @@ jobs:
           
           if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
             if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
-              ./gradlew bundleRelease --build-cache --parallel
+              ./gradlew bundleRelease --build-cache --parallel --no-daemon
             else
-              ./gradlew assembleRelease --build-cache --parallel
+              ./gradlew assembleRelease --build-cache --parallel --no-daemon
             fi
           else
-            ./gradlew assembleDebug --build-cache --parallel
+            ./gradlew assembleDebug --build-cache --parallel --no-daemon
           fi
 
-      # Rest of the workflow remains the same...
-      - name: Verify and copy build outputs
+      - name: "✅ Verify Build Output"
         id: verify_outputs
         run: |
           if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
@@ -412,12 +415,14 @@ jobs:
             FILE_SIZE=$(stat -c%s "artifacts/$ARTIFACT_NAME")
             echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
             echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+            
+            echo "✅ Build successful! Output: $ARTIFACT_NAME ($(du -h artifacts/$ARTIFACT_NAME | cut -f1))"
           else
-            echo "Built app not found at expected path: $BUILT_APP_PATH"
+            echo "❌ Build failed - output not found at: $BUILT_APP_PATH"
             exit 1
           fi
 
-      - name: Create build info
+      - name: "📊 Create Build Information"
         run: |
           BUILD_ID="${{ env.BUILD_ID }}"
           TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -436,18 +441,24 @@ jobs:
             "websiteAddress": "${{ env.WEBSITE_ADDRESS }}",
             "fileSize": ${{ env.FILE_SIZE }},
             "fileName": "${{ env.ARTIFACT_NAME }}",
-            "hasCustomIcon": ${{ env.HAS_CUSTOM_ICON }}
+            "hasCustomIcon": ${{ env.HAS_CUSTOM_ICON }},
+            "cacheStatus": {
+              "npm": "${{ steps.npm-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "gradle": "${{ steps.gradle-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "androidSdk": "${{ steps.android-sdk-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "nativeDeps": "${{ steps.native-deps-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}"
+            }
           }
           EOF
 
-      - name: Configure AWS credentials
+      - name: "🔐 Configure AWS Credentials"
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
-      - name: Upload to S3
+      - name: "☁️ Upload to S3"
         id: upload_s3
         run: |
           BUILD_ID="${{ env.BUILD_ID }}"
@@ -456,10 +467,11 @@ jobs:
           ARTIFACT_NAME="${{ env.ARTIFACT_NAME }}"
           
           if [ -z "$S3_BUCKET" ]; then
-            echo "Error: AWS_S3_BUCKET secret not configured"
+            echo "❌ Error: AWS_S3_BUCKET secret not configured"
             exit 1
           fi
           
+          echo "Uploading to S3 bucket: $S3_BUCKET"
           aws s3 cp "artifacts/$ARTIFACT_NAME" "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
           aws s3 cp artifacts/build-info.json "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
           
@@ -468,8 +480,9 @@ jobs:
           
           echo "APP_DOWNLOAD_URL=$APP_DOWNLOAD_URL" >> $GITHUB_ENV
           echo "INFO_DOWNLOAD_URL=$INFO_DOWNLOAD_URL" >> $GITHUB_ENV
+          echo "✅ Upload complete!"
 
-      - name: Update build status
+      - name: "📊 Update Build Status"
         if: always()
         run: |
           BUILD_ID="${{ env.BUILD_ID }}"
@@ -503,7 +516,13 @@ jobs:
             "appName": "${{ env.APP_NAME }}",
             "buildType": "${{ env.BUILD_TYPE }}",
             "outputType": "${{ env.OUTPUT_TYPE }}",
-            "fileSize": ${{ env.FILE_SIZE || 0 }}
+            "fileSize": ${{ env.FILE_SIZE || 0 }},
+            "cachePerformance": {
+              "npm": "${{ steps.npm-cache.outputs.cache-hit == 'true' && 'optimal' || 'fallback' }}",
+              "gradle": "${{ steps.gradle-cache.outputs.cache-hit == 'true' && 'optimal' || 'fallback' }}",
+              "androidSdk": "${{ steps.android-sdk-cache.outputs.cache-hit == 'true' && 'optimal' || 'fallback' }}",
+              "nativeDeps": "${{ steps.native-deps-cache.outputs.cache-hit == 'true' && 'optimal' || 'fallback' }}"
+            }
           }
           EOF
           
@@ -511,21 +530,41 @@ jobs:
             aws s3 cp build-status.json "s3://${S3_BUCKET}/status/${BUILD_ID}.json" --no-progress
           fi
 
-      - name: Build completion summary
+      - name: "📈 Build Summary"
         if: always()
         run: |
-          echo "=================================="
-          echo "BUILD PROCESS COMPLETED"
-          echo "=================================="
-          echo "Status: ${{ job.status }}"
-          echo "Build ID: ${{ env.BUILD_ID }}"
-          echo "Duration: ~1-2 minutes (optimized)"
+          echo "## 🚀 Build Process Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Details:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build ID**: ${{ env.BUILD_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Name**: ${{ env.APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Type**: ${{ env.BUILD_TYPE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Output Type**: ${{ env.OUTPUT_TYPE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status == 'success' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
           if [ "${{ job.status }}" == "success" ]; then
-            echo "Download URL: ${{ env.APP_DOWNLOAD_URL }}"
+            echo "### 📦 Build Output:" >> $GITHUB_STEP_SUMMARY
+            echo "- **File**: ${{ env.ARTIFACT_NAME }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Size**: $(du -h artifacts/${{ env.ARTIFACT_NAME }} | cut -f1)" >> $GITHUB_STEP_SUMMARY
+            if [ -n "${{ env.APP_DOWNLOAD_URL }}" ]; then
+              echo "- **Download**: Available via S3" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
-          echo "=================================="
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚡ Cache Performance:" >> $GITHUB_STEP_SUMMARY
+          echo "- NPM Dependencies: ${{ steps.npm-cache.outputs.cache-hit == 'true' && '✅ Cache Hit' || '⚠️  Cache Miss' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Gradle Dependencies: ${{ steps.gradle-cache.outputs.cache-hit == 'true' && '✅ Cache Hit' || '⚠️  Cache Miss' }}" >> $GITHUB_STEP_SUMMARY  
+          echo "- Android SDK: ${{ steps.android-sdk-cache.outputs.cache-hit == 'true' && '✅ Cache Hit' || '⚠️  Cache Miss' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Native Dependencies: ${{ steps.native-deps-cache.outputs.cache-hit == 'true' && '✅ Cache Hit' || '⚠️  Cache Miss' }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.npm-cache.outputs.cache-hit }}" != "true" ] || [ "${{ steps.gradle-cache.outputs.cache-hit }}" != "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "💡 **Tip**: Run the cache setup workflow first to speed up future builds!" >> $GITHUB_STEP_SUMMARY
+          fi
 
-      - name: Upload artifacts
+      - name: "📤 Upload Build Artifacts"
         if: always()
         uses: actions/upload-artifact@v4
         with:
