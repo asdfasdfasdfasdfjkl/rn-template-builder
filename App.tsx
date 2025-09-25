@@ -8,8 +8,7 @@ import {
   Platform,
   View,
   PermissionsAndroid,
-  Dimensions,
-  NetInfo,
+  Dimensions
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import NetInfo from '@react-native-community/netinfo';
