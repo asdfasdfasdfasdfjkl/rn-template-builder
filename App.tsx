@@ -9,14 +9,15 @@ import {
   View,
   PermissionsAndroid,
   Dimensions,
+  NetInfo,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import NetInfo from '@react-native-community/netinfo';
 
 const PERMISSION_CONFIG = require('./permissionConfig').PERMISSION_CONFIG;
 
 // Get device dimensions for better responsive handling
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
 
 const requestPermissions = async () => {
   if (Platform.OS === 'android') {
@@ -80,24 +81,50 @@ const App = () => {
   const [statusBarBg, setStatusBarBg] = useState('#ffffff');
   const [refreshing, setRefreshing] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
-const [permissionsGranted, setPermissionsGranted] = useState({});
+  const [permissionsGranted, setPermissionsGranted] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [isConnected, setIsConnected] = useState(true);
+  const [connectionType, setConnectionType] = useState('wifi');
 
   const onRefresh = () => {
     setRefreshing(true);
-    webViewRef.current?.reload();
+    if (isConnected) {
+      // Force reload from network when online
+      webViewRef.current?.reload();
+    } else {
+      // Just reload from cache when offline
+      webViewRef.current?.reload();
+      setRefreshing(false);
+    }
   };
 
   // Replace this URL with your desired URL
   const INITIAL_URL = "{{website_address}}";
 
   useEffect(() => {
-  const initializePermissions = async () => {
-    const granted = await requestPermissions();
-    setPermissionsGranted(granted);
-  };
-  
-  initializePermissions();
-}, []);
+    const initializePermissions = async () => {
+      const granted = await requestPermissions();
+      setPermissionsGranted(granted);
+    };
+    
+    initializePermissions();
+  }, []);
+
+  // Network status monitoring
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsConnected(state.isConnected ?? false);
+      setConnectionType(state.type);
+      
+      console.log('Network state changed:', {
+        isConnected: state.isConnected,
+        type: state.type,
+        isInternetReachable: state.isInternetReachable
+      });
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const backAction = () => {
@@ -135,15 +162,126 @@ const [permissionsGranted, setPermissionsGranted] = useState({});
     }
   };
 
+  const onLoadEnd = () => {
+    setIsLoading(false);
+    if (refreshing) {
+      setRefreshing(false);
+    }
+  };
+
+  const onLoadStart = () => {
+    setIsLoading(true);
+  };
+
+  // Enhanced injected JavaScript with caching and offline handling
   const injectedJS = `
     (function() {
+      let lastTheme = null;
+      let isOnline = ${isConnected};
+      let cacheVersion = 'v1.0';
+      
+      // Network status monitoring from React Native
+      window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'NETWORK_STATUS') {
+          isOnline = event.data.isConnected;
+          console.log('Network status updated:', isOnline);
+          handleNetworkChange();
+        }
+      });
+
+      // Enhanced caching system
+      function setupCaching() {
+        if ('serviceWorker' in navigator) {
+          // Register service worker for advanced caching
+          navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.log('Service worker registration failed');
+          });
+        }
+
+        // Intercept and cache requests
+        if (window.fetch) {
+          const originalFetch = window.fetch;
+          window.fetch = function(...args) {
+            const request = args[0];
+            const url = typeof request === 'string' ? request : request.url;
+            
+            if (isOnline) {
+              // When online, fetch from network and cache
+              return originalFetch.apply(this, args)
+                .then(response => {
+                  if (response.ok && shouldCache(url)) {
+                    // Clone response for caching
+                    const responseClone = response.clone();
+                    cacheResponse(url, responseClone);
+                  }
+                  return response;
+                })
+                .catch(error => {
+                  // If network fails, try cache
+                  return getCachedResponse(url) || Promise.reject(error);
+                });
+            } else {
+              // When offline, serve from cache
+              return getCachedResponse(url) || originalFetch.apply(this, args);
+            }
+          };
+        }
+      }
+
+      function shouldCache(url) {
+        // Define what should be cached
+        const cacheableExtensions = ['.html', '.css', '.js', '.json', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2'];
+        const uncacheablePatterns = ['/api/live', '/stream', '/socket', '/ws'];
+        
+        // Don't cache real-time data
+        if (uncacheablePatterns.some(pattern => url.includes(pattern))) {
+          return false;
+        }
+        
+        // Cache static resources and main pages
+        return cacheableExtensions.some(ext => url.includes(ext)) || 
+               url === window.location.href ||
+               url.includes(window.location.hostname);
+      }
+
+      function cacheResponse(url, response) {
+        try {
+          if ('caches' in window) {
+            caches.open(cacheVersion).then(cache => {
+              cache.put(url, response);
+            });
+          }
+        } catch (error) {
+          console.log('Caching failed for:', url);
+        }
+      }
+
+      function getCachedResponse(url) {
+        if ('caches' in window) {
+          return caches.open(cacheVersion).then(cache => {
+            return cache.match(url);
+          }).catch(() => null);
+        }
+        return null;
+      }
+
+      function handleNetworkChange() {
+        if (isOnline) {
+          // When back online, optionally refresh content
+          console.log('Back online - content will refresh on next navigation');
+        } else {
+          console.log('Gone offline - serving cached content');
+        }
+      }
+
+      // Theme detection (keeping your existing theme code)
       function rgbToHex(color) {
-        if (!color) return '#ffffff';
+        if (!color || color === 'transparent') return '#ffffff';
         
-        // Handle hex colors
-        if (color.startsWith('#')) return color;
+        if (color.startsWith('#')) {
+          return color.length === 7 ? color : '#ffffff';
+        }
         
-        // Handle rgb/rgba colors
         const rgb = color.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
         if (!rgb) return '#ffffff';
         
@@ -157,112 +295,202 @@ const [permissionsGranted, setPermissionsGranted] = useState({});
         }).join('');
       }
 
-      function isDark(hexColor) {
+      function getLuminance(hexColor) {
         const hex = hexColor.replace('#', '');
-        if (hex.length !== 6) return false;
+        if (hex.length !== 6) return 1;
         
-        const r = parseInt(hex.substring(0, 2), 16);
-        const g = parseInt(hex.substring(2, 4), 16);
-        const b = parseInt(hex.substring(4, 6), 16);
+        const r = parseInt(hex.substring(0, 2), 16) / 255;
+        const g = parseInt(hex.substring(2, 4), 16) / 255;
+        const b = parseInt(hex.substring(4, 6), 16) / 255;
         
-        // Use proper luminance calculation
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        return luminance < 0.5;
+        const toLinear = (c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        
+        const rLinear = toLinear(r);
+        const gLinear = toLinear(g);
+        const bLinear = toLinear(b);
+        
+        return 0.2126 * rLinear + 0.7152 * gLinear + 0.0722 * bLinear;
       }
 
-      function getTheme() {
-        try {
-          const bodyStyle = window.getComputedStyle(document.body);
-          const htmlStyle = window.getComputedStyle(document.documentElement);
-          
-          // Try multiple sources for background color
-          const rawColor = bodyStyle.backgroundColor || 
-                           htmlStyle.backgroundColor || 
-                           '#ffffff';
-          
-          const backgroundColor = rgbToHex(rawColor);
-          const darkMode = isDark(backgroundColor);
+      function isDark(hexColor) {
+        return getLuminance(hexColor) < 0.179;
+      }
 
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'THEME_UPDATE',
-            theme: {
-              backgroundColor,
-              barStyle: darkMode ? 'light-content' : 'dark-content'
+      function getEffectiveBackgroundColor() {
+        const elements = [
+          document.body,
+          document.documentElement,
+          document.querySelector('main'),
+          document.querySelector('.app'),
+          document.querySelector('#app'),
+          document.querySelector('#root')
+        ].filter(el => el);
+
+        for (const element of elements) {
+          const style = window.getComputedStyle(element);
+          const bgColor = style.backgroundColor;
+          
+          if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+            const hexColor = rgbToHex(bgColor);
+            if (hexColor !== '#ffffff' || element === document.body) {
+              return hexColor;
             }
-          }));
+          }
+        }
+
+        const isDarkMode = document.body.classList.contains('dark') ||
+                          document.documentElement.classList.contains('dark') ||
+                          document.body.getAttribute('data-theme') === 'dark' ||
+                          document.documentElement.getAttribute('data-theme') === 'dark';
+
+        return isDarkMode ? '#121212' : '#ffffff';
+      }
+
+      function updateTheme() {
+        try {
+          const backgroundColor = getEffectiveBackgroundColor();
+          const darkMode = isDark(backgroundColor);
+          const barStyle = darkMode ? 'light-content' : 'dark-content';
+          
+          const themeData = {
+            backgroundColor,
+            barStyle
+          };
+
+          if (JSON.stringify(themeData) !== JSON.stringify(lastTheme)) {
+            lastTheme = themeData;
+            
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'THEME_UPDATE',
+                theme: themeData
+              }));
+            }
+          }
         } catch (error) {
-          // Fallback to default theme
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'THEME_UPDATE',
-            theme: {
-              backgroundColor: '#ffffff',
-              barStyle: 'dark-content'
-            }
-          }));
+          console.error('Theme detection error:', error);
+          
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'THEME_UPDATE',
+              theme: {
+                backgroundColor: '#ffffff',
+                barStyle: 'dark-content'
+              }
+            }));
+          }
         }
       }
 
-      // Initial theme detection
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', getTheme);
-      } else {
-        getTheme();
+      // Initialize everything
+      function initialize() {
+        setupCaching();
+        
+        const initialDetection = () => {
+          setTimeout(updateTheme, 100);
+          setTimeout(updateTheme, 500);
+          setTimeout(updateTheme, 1000);
+        };
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', initialDetection);
+        } else {
+          initialDetection();
+        }
+
+        if (window.MutationObserver) {
+          const observer = new MutationObserver(() => {
+            clearTimeout(window.themeUpdateTimeout);
+            window.themeUpdateTimeout = setTimeout(updateTheme, 100);
+          });
+          
+          observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['class', 'data-theme', 'style'],
+            subtree: true
+          });
+        }
+
+        let styleSheets = document.styleSheets.length;
+        const checkForStyleChanges = () => {
+          if (document.styleSheets.length !== styleSheets) {
+            styleSheets = document.styleSheets.length;
+            updateTheme();
+          }
+        };
+        
+        setInterval(checkForStyleChanges, 2000);
+        
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) {
+            setTimeout(updateTheme, 100);
+          }
+        });
       }
 
-      // Periodic theme detection
-      let themeInterval = setInterval(getTheme, 3000);
-      
-      // Also check on visibility change
-      document.addEventListener('visibilitychange', getTheme);
-      
-      // Cleanup interval when page unloads
-      window.addEventListener('beforeunload', () => {
-        clearInterval(themeInterval);
-      });
-
-      // Add viewport meta tag if not present for better mobile experience
-      if (!document.querySelector('meta[name="viewport"]')) {
-        const viewport = document.createElement('meta');
-        viewport.name = 'viewport';
-        viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-        document.head.appendChild(viewport);
-      }
+      // Start initialization
+      initialize();
     })();
   `;
 
+  // Don't show error alerts for network issues - let the website handle it
   const onError = (syntheticEvent: any) => {
     const { nativeEvent } = syntheticEvent;
     console.warn('WebView error: ', nativeEvent);
+    setIsLoading(false);
     
-    Alert.alert(
-      'Connection Error',
-      'Unable to load the page. Please check your internet connection and try again.',
-      [
-        { text: 'Retry', onPress: () => webViewRef.current?.reload() },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    // Only show alert for non-network errors
+    if (!nativeEvent.description?.includes('net::') && 
+        !nativeEvent.description?.includes('ERR_INTERNET_DISCONNECTED') &&
+        !nativeEvent.description?.includes('ERR_NETWORK_CHANGED')) {
+      Alert.alert(
+        'Error',
+        'Something went wrong. Please try again.',
+        [
+          { text: 'Retry', onPress: () => webViewRef.current?.reload() },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+    }
   };
 
   const onHttpError = (syntheticEvent: any) => {
     const { nativeEvent } = syntheticEvent;
     console.warn('WebView HTTP error: ', nativeEvent);
+    setIsLoading(false);
+    // Don't show alerts for HTTP errors - let website handle
   };
+
+  // Send network status updates to WebView
+  useEffect(() => {
+    if (webViewRef.current) {
+      const networkStatusMessage = JSON.stringify({
+        type: 'NETWORK_STATUS',
+        isConnected: isConnected,
+        connectionType: connectionType
+      });
+      
+      webViewRef.current.postMessage(networkStatusMessage);
+    }
+  }, [isConnected, connectionType]);
 
   return (
     <View style={styles.container}>
       <StatusBar
         barStyle={statusBarStyle}
-        backgroundColor={statusBarBg}
-        translucent={false}
+        backgroundColor={Platform.OS === 'android' ? statusBarBg : undefined}
+        translucent={Platform.OS === 'android'}
+        hidden={false}
       />
       
-      <SafeAreaView style={[styles.webviewContainer, { backgroundColor: statusBarBg }]}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: statusBarBg }]}>
         <WebView
           ref={webViewRef}
           source={{ uri: INITIAL_URL }}
           style={styles.webview}
           onNavigationStateChange={onNavigationStateChange}
+          onLoadStart={onLoadStart}
+          onLoadEnd={onLoadEnd}
           javaScriptEnabled={true}
           domStorageEnabled={true}
           startInLoadingState={true}
@@ -274,14 +502,18 @@ const [permissionsGranted, setPermissionsGranted] = useState({});
           bounces={Platform.OS === 'ios'}
           scrollEnabled={true}
           injectedJavaScript={injectedJS}
-          allowsInlineMediaPlaybook={true}
+          allowsInlineMediaPlayback={true}
           mediaPlaybackRequiresUserAction={false}
           allowsFullscreenVideo={true}
           pullToRefreshEnabled={true}
           onRefresh={onRefresh}
           refreshing={refreshing}
           
-          // Error handling
+          // Enhanced caching settings
+          cacheEnabled={true}
+          cacheMode={isConnected ? 'LOAD_DEFAULT' : 'LOAD_CACHE_ELSE_NETWORK'}
+          
+          // Error handling - minimal for offline support
           onError={onError}
           onHttpError={onHttpError}
           
@@ -301,16 +533,23 @@ const [permissionsGranted, setPermissionsGranted] = useState({});
           
           // Security and performance
           onShouldStartLoadWithRequest={request => {
-            // Add any URL filtering logic here if needed
             return true;
           }}
           
-          // Additional WebView props for better UX
+          // Enhanced caching and offline settings
           textZoom={100}
-          cacheEnabled={true}
           incognito={false}
           thirdPartyCookiesEnabled={true}
           sharedCookiesEnabled={true}
+          
+          // Offline-friendly user agent
+          userAgent="Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
+          
+          // Additional props for better offline experience
+          originWhitelist={['*']}
+          onContentProcessDidTerminate={() => {
+            webViewRef.current?.reload();
+          }}
         />
       </SafeAreaView>
     </View>
@@ -322,21 +561,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
   },
-  webviewContainer: {
+  safeArea: {
     flex: 1,
     backgroundColor: '#ffffff',
-    // Ensure proper spacing on all devices
     paddingTop: Platform.select({
-      ios: 0, // SafeAreaView handles this on iOS
-      android: 0, // StatusBar with translucent={false} handles this
+      ios: 0,
+      android: StatusBar.currentHeight || 0,
       default: 0,
     }),
   },
   webview: {
     flex: 1,
     width: '100%',
-    height: '100%',
-    backgroundColor: 'transparent',
+    backgroundColor: '#ffffff',
   },
 });
 
