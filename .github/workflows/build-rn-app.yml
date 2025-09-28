@@ -530,6 +530,22 @@ jobs:
             aws s3 cp build-status.json "s3://${S3_BUCKET}/status/${BUILD_ID}.json" --no-progress
           fi
 
+      - name: Make API Request
+        run: |
+          # Extract repository name from GITHUB_REPOSITORY (owner/repo-name -> repo-name)
+          REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+          
+          # Build the API URL
+          API_URL="/api/build/build-status?buildId=${REPO_NAME}&owner=asdfasdfasdfasdfjkl&repo=${REPO_NAME}"
+          
+          echo "Making request to: ${API_URL}"
+          
+          # Make the HTTP request (replace YOUR_BASE_URL with your actual API base URL)
+          curl -X GET \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "https://qavola.com${API_URL}"
+
       - name: "📈 Build Summary"
         if: always()
         run: |
