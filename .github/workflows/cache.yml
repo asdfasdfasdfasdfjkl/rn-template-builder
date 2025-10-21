@@ -203,11 +203,14 @@ jobs:
           sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/src/main/java/com/rn_project_template/MainApplication.kt
           sed -i 's/{{name_space}}/com.cachewarmer.app/g' android/app/src/main/AndroidManifest.xml
           
-          # Add basic permissions
+          # Add basic permissions (replace placeholder)
           sed -i 's/{{PERMISSIONS_PLACEHOLDER}}/<uses-permission android:name="android.permission.INTERNET" \/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" \/>/g' android/app/src/main/AndroidManifest.xml
           
-          # Enable cleartext traffic
-          sed -i 's/<application/<application\n        android:usesCleartextTraffic="true"/g' android/app/src/main/AndroidManifest.xml
+          # Enable cleartext traffic ONLY if not already present
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
+            sed -i 's/<application/<application\n        android:usesCleartextTraffic="true"/g' "$MANIFEST_PATH"
+          fi
           
           # Restructure Java package
           mkdir -p android/app/src/main/java/com/cachewarmer/app
