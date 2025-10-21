@@ -352,8 +352,12 @@ jobs:
       - name: "🌐 Enable Cleartext Traffic"
         run: |
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          # Only add if not already present to avoid duplicate attribute error
           if [ -f "$MANIFEST_PATH" ] && ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
             sed -i 's/<application/<application\n        android:usesCleartextTraffic="true"/g' "$MANIFEST_PATH"
+            echo "✓ Added usesCleartextTraffic attribute"
+          else
+            echo "✓ usesCleartextTraffic already present or will be added via placeholder"
           fi
 
       - name: "🔧 Make Gradlew Executable"
