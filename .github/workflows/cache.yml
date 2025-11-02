@@ -188,25 +188,30 @@ jobs:
           
           echo "Applying minimal template customizations..."
           
-          # Replace all placeholders in all files
-          find . -type f \( -name "*.gradle" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.json" -o -name "*.tsx" \) \
+          # CRITICAL: Replace ALL occurrences in source files BEFORE Gradle runs
+          find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.json" -o -name "*.tsx" -o -name "*.ts" -o -name "*.js" \) \
             -not -path "*/node_modules/*" \
             -not -path "*/.git/*" \
             -not -path "*/build/*" \
-            -exec sed -i 's/{{name_space}}/com.cachewarmer.app/g' {} +
+            -not -path "*/.gradle/*" \
+            2>/dev/null | while read -r file; do
+              if [ -f "$file" ]; then
+                sed -i 's/{{name_space}}/com.cachewarmer.app/g' "$file" 2>/dev/null || true
+              fi
+            done
           
           # Apply other replacements
           sed -i 's/rn_project_template/cachewarmer/g' android/settings.gradle
           sed -i 's/rn_project_template/cachewarmer/g' app.json
-          sed -i 's/"rn_project_template"/"cachewarmer"/g' android/app/src/main/java/com/rn_project_template/MainActivity.kt
           sed -i 's|{{website_address}}|https://example.com|g' App.tsx
           sed -i 's/{{app_name}}/CacheWarmer/g' app.json
           sed -i 's/{{version_code}}/1/g' android/app/build.gradle
           sed -i 's/rn_project_template/CacheWarmer/g' android/app/src/main/res/values/strings.xml
           sed -i 's/{{version_name}}/1.0.0/g' android/app/build.gradle
           sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/build.gradle
-          sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/src/main/java/com/rn_project_template/MainActivity.kt
-          sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/src/main/java/com/rn_project_template/MainApplication.kt
+          
+          # Replace in Kotlin/Java files
+          find android/app/src/main/java -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i 's/com.rn_project_template/com.cachewarmer.app/g' {} +
           
           # Add basic permissions (replace placeholder)
           sed -i 's/{{PERMISSIONS_PLACEHOLDER}}/<uses-permission android:name="android.permission.INTERNET" \/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" \/>/g' android/app/src/main/AndroidManifest.xml
@@ -222,11 +227,36 @@ jobs:
           if [ -d "android/app/src/main/java/com/rn_project_template" ]; then
             mv android/app/src/main/java/com/rn_project_template/* android/app/src/main/java/com/cachewarmer/app/ 2>/dev/null || true
             rm -rf android/app/src/main/java/com/rn_project_template
+            # Clean up empty directories
+            find android/app/src/main/java -type d -empty -delete 2>/dev/null || true
           fi
           
-          # Verify no duplicate classes remain
-          echo "Checking for duplicate class files..."
-          find android/app/src/main/java -name "MainActivity.kt" -o -name "MainApplication.kt" | sort
+          # Create a Gradle task wrapper that fixes auto-generated files
+          cat > android/fix-autogen.gradle << 'GRADLESCRIPT'
+          tasks.whenTaskAdded { task ->
+              if (task.name.contains("compileRelease") || task.name.contains("compileDebug")) {
+                  task.doFirst {
+                      def autolinkDir = file("${buildDir}/generated/autolinking/src/main/java/com/facebook/react")
+                      if (autolinkDir.exists()) {
+                          autolinkDir.eachFileRecurse { file ->
+                              if (file.name.endsWith('.java')) {
+                                  def content = file.text
+                                  if (content.contains('{{name_space}}')) {
+                                      content = content.replace('{{name_space}}', 'com.cachewarmer.app')
+                                      file.write(content)
+                                      println "Fixed placeholder in: ${file.name}"
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          GRADLESCRIPT
+          
+          # Add the fix script to build.gradle
+          echo "" >> android/app/build.gradle
+          echo "apply from: '../fix-autogen.gradle'" >> android/app/build.gradle
           
           cd android
           
@@ -282,28 +312,24 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Cache Status:" >> $GITHUB_STEP_SUMMARY
           
-          # Check npm cache
           if [ "${{ steps.npm-cache.outputs.cache-hit }}" == "true" ]; then
             echo "- ✅ NPM dependencies: CACHE HIT" >> $GITHUB_STEP_SUMMARY
           else
             echo "- 🔄 NPM dependencies: CACHE MISS (newly cached)" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Check gradle cache
           if [ "${{ steps.gradle-cache.outputs.cache-hit }}" == "true" ]; then
             echo "- ✅ Gradle dependencies: CACHE HIT" >> $GITHUB_STEP_SUMMARY
           else
             echo "- 🔄 Gradle dependencies: CACHE MISS (newly cached)" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Check Android SDK cache
           if [ "${{ steps.android-sdk-cache.outputs.cache-hit }}" == "true" ]; then
             echo "- ✅ Android SDK: CACHE HIT" >> $GITHUB_STEP_SUMMARY
           else
             echo "- 🔄 Android SDK: CACHE MISS (newly cached)" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Check native dependencies
           if [ "${{ steps.native-deps-cache.outputs.cache-hit }}" == "true" ]; then
             echo "- ✅ Native dependencies: CACHE HIT" >> $GITHUB_STEP_SUMMARY
           else
@@ -315,41 +341,7 @@ jobs:
           echo "- ✅ Dex files: NEWLY CACHED" >> $GITHUB_STEP_SUMMARY
           
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Installed Components:" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Node.js ${{ env.NODE_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Java JDK ${{ env.JAVA_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Android SDK with Platform Tools" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Gradle wrapper and dependencies" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Metro bundler cache prepared" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Sharp image processing library" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Pre-built Android app (warm build cache)" >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Cache Sizes:" >> $GITHUB_STEP_SUMMARY
-          
-          # Verify paths exist and show sizes
-          if [ -d "node_modules" ]; then
-            NODE_SIZE=$(du -sh node_modules 2>/dev/null | cut -f1 || echo "N/A")
-            echo "- Node modules: $NODE_SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -d "$HOME/.gradle" ]; then
-            GRADLE_SIZE=$(du -sh ~/.gradle 2>/dev/null | cut -f1 || echo "N/A")
-            echo "- Gradle cache: $GRADLE_SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -d "$ANDROID_HOME" ]; then
-            ANDROID_SIZE=$(du -sh $ANDROID_HOME 2>/dev/null | cut -f1 || echo "N/A")
-            echo "- Android SDK: $ANDROID_SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -d "android/app/build" ]; then
-            BUILD_SIZE=$(du -sh android/app/build 2>/dev/null | cut -f1 || echo "N/A")
-            echo "- Android build outputs: $BUILD_SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**🚀 Cache setup complete with pre-built app! Build workflows will now run in ~1-2 minutes.**" >> $GITHUB_STEP_SUMMARY
+          echo "**🚀 Cache setup complete! Build workflows should now be faster.**" >> $GITHUB_STEP_SUMMARY
 
       # Store Cache Metadata
       - name: "📊 Store Cache Metadata"
@@ -362,15 +354,8 @@ jobs:
             "node_version": "${{ env.NODE_VERSION }}",
             "java_version": "${{ env.JAVA_VERSION }}",
             "force_refresh": "${{ github.event.inputs.force_refresh }}",
-            "prebuild_completed": true,
-            "cache_results": {
-              "npm_hit": "${{ steps.npm-cache.outputs.cache-hit }}",
-              "gradle_hit": "${{ steps.gradle-cache.outputs.cache-hit }}",
-              "android_sdk_hit": "${{ steps.android-sdk-cache.outputs.cache-hit }}",
-              "native_deps_hit": "${{ steps.native-deps-cache.outputs.cache-hit }}"
-            }
+            "prebuild_completed": true
           }
           EOF
           
-          echo "✅ Cache setup completed successfully with pre-built app"
-          echo "📊 Cache metadata saved for future reference"
+          echo "✅ Cache setup completed successfully"
