@@ -163,7 +163,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-kotlin-
 
-      # NEW: Pre-build Android App with Dummy Data
+      # Pre-build Android App with Dummy Data
       - name: "🏗️ Pre-build Android App (Warm Build Cache)"
         id: prebuild
         run: |
@@ -188,12 +188,18 @@ jobs:
           
           echo "Applying minimal template customizations..."
           
-          # Apply minimal replacements (just enough to build)
+          # Replace all placeholders in all files
+          find . -type f \( -name "*.gradle" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.json" -o -name "*.tsx" \) \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.git/*" \
+            -not -path "*/build/*" \
+            -exec sed -i 's/{{name_space}}/com.cachewarmer.app/g' {} +
+          
+          # Apply other replacements
           sed -i 's/rn_project_template/cachewarmer/g' android/settings.gradle
           sed -i 's/rn_project_template/cachewarmer/g' app.json
           sed -i 's/"rn_project_template"/"cachewarmer"/g' android/app/src/main/java/com/rn_project_template/MainActivity.kt
-          sed -i 's/{{name_space}}/com.cachewarmer.app/g' android/app/src/main/java/com/rn_project_template/MainActivity.kt
-          sed -i 's/{{website_address}}/https:\/\/example.com/g' App.tsx
+          sed -i 's|{{website_address}}|https://example.com|g' App.tsx
           sed -i 's/{{app_name}}/CacheWarmer/g' app.json
           sed -i 's/{{version_code}}/1/g' android/app/build.gradle
           sed -i 's/rn_project_template/CacheWarmer/g' android/app/src/main/res/values/strings.xml
@@ -201,7 +207,6 @@ jobs:
           sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/build.gradle
           sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/src/main/java/com/rn_project_template/MainActivity.kt
           sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/src/main/java/com/rn_project_template/MainApplication.kt
-          sed -i 's/{{name_space}}/com.cachewarmer.app/g' android/app/src/main/AndroidManifest.xml
           
           # Add basic permissions (replace placeholder)
           sed -i 's/{{PERMISSIONS_PLACEHOLDER}}/<uses-permission android:name="android.permission.INTERNET" \/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" \/>/g' android/app/src/main/AndroidManifest.xml
@@ -212,11 +217,17 @@ jobs:
             sed -i 's/<application/<application\n        android:usesCleartextTraffic="true"/g' "$MANIFEST_PATH"
           fi
           
-          # Restructure Java package
+          # Restructure Java package - MOVE not COPY
           mkdir -p android/app/src/main/java/com/cachewarmer/app
-          cp -r android/app/src/main/java/com/rn_project_template/* android/app/src/main/java/com/cachewarmer/app/
-          rm -rf android/app/src/main/java/com/rn_project_template
-
+          if [ -d "android/app/src/main/java/com/rn_project_template" ]; then
+            mv android/app/src/main/java/com/rn_project_template/* android/app/src/main/java/com/cachewarmer/app/ 2>/dev/null || true
+            rm -rf android/app/src/main/java/com/rn_project_template
+          fi
+          
+          # Verify no duplicate classes remain
+          echo "Checking for duplicate class files..."
+          find android/app/src/main/java -name "MainActivity.kt" -o -name "MainApplication.kt" | sort
+          
           cd android
           
           echo "Building Android app to warm caches..."
@@ -228,7 +239,7 @@ jobs:
           
           echo "✓ Pre-build complete - build caches warmed!"
 
-      # NEW: Cache Android Build Outputs
+      # Cache Android Build Outputs
       - name: "📦 Cache Android Build Outputs"
         uses: actions/cache@v4
         with:
@@ -241,7 +252,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-build-
 
-      # NEW: Cache Compiled Kotlin/Java Classes
+      # Cache Compiled Kotlin/Java Classes
       - name: "📦 Cache Compiled Classes"
         uses: actions/cache@v4
         with:
@@ -253,7 +264,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-compiled-classes-
 
-      # NEW: Cache Dex Files
+      # Cache Dex Files
       - name: "📦 Cache Dex Files"
         uses: actions/cache@v4
         with:
