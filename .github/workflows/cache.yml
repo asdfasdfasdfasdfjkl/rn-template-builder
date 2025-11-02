@@ -215,7 +215,8 @@ jobs:
           # Restructure Java package
           mkdir -p android/app/src/main/java/com/cachewarmer/app
           cp -r android/app/src/main/java/com/rn_project_template/* android/app/src/main/java/com/cachewarmer/app/
-          
+          rm -rf android/app/src/main/java/com/rn_project_template
+
           cd android
           
           echo "Building Android app to warm caches..."
