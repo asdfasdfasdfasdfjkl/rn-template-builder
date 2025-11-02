@@ -15,8 +15,8 @@ on:
 env:
   NODE_VERSION: '18'
   JAVA_VERSION: '17'
-  ANDROID_HOME: /opt/android-sdk-linux
-  ANDROID_SDK_ROOT: /opt.android-sdk-linux
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
 jobs:
   setup-cache:
@@ -48,10 +48,13 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      # Android SDK Setup
+      # Android SDK Setup with proper permissions
       - name: "🤖 Setup Android SDK"
         uses: android-actions/setup-android@v3
+        with:
+          android-sdk-directory: ${{ env.ANDROID_HOME }}
 
+      # Cache Android SDK components
       - name: "📦 Cache Android SDK"
         uses: actions/cache@v4
         id: android-sdk-cache
@@ -62,7 +65,7 @@ jobs:
             ${{ env.ANDROID_HOME }}/platforms
             ${{ env.ANDROID_HOME }}/platform-tools
             ${{ env.ANDROID_HOME }}/build-tools
-          key: android-sdk-${{ runner.os }}-${{ hashFiles('android/**/build.gradle*') }}
+          key: android-sdk-${{ runner.os }}-v1
           restore-keys: |
             android-sdk-${{ runner.os }}-
 
@@ -75,9 +78,9 @@ jobs:
         run: |
           cd android
           # Download dependencies without building
-          ./gradlew dependencies --configuration implementation --no-daemon
-          ./gradlew dependencies --configuration releaseImplementation --no-daemon
-          ./gradlew dependencies --configuration debugImplementation --no-daemon
+          ./gradlew dependencies --configuration implementation --no-daemon --quiet
+          ./gradlew dependencies --configuration releaseImplementation --no-daemon --quiet
+          ./gradlew dependencies --configuration debugImplementation --no-daemon --quiet
 
       # Create universal pre-build that works with any namespace
       - name: "🏗️ Universal Pre-build for Cache Warming"
