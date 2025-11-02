@@ -73,14 +73,18 @@ jobs:
       - name: "🔧 Make Gradlew Executable"
         run: chmod +x android/gradlew
 
-      # Pre-download dependencies with template placeholders intact
+      # Fixed: Correct Gradle dependency download
       - name: "⬇️ Pre-download Gradle Dependencies"
         run: |
           cd android
-          # Download dependencies without building
-          ./gradlew dependencies --configuration implementation --no-daemon --quiet
-          ./gradlew dependencies --configuration releaseImplementation --no-daemon --quiet
-          ./gradlew dependencies --configuration debugImplementation --no-daemon --quiet
+          echo "Downloading Gradle dependencies..."
+          
+          # Download dependencies for all projects and configurations
+          ./gradlew androidDependencies \
+            --build-cache \
+            --no-daemon \
+            --quiet \
+            --configure-on-demand
 
       # Create universal pre-build that works with any namespace
       - name: "🏗️ Universal Pre-build for Cache Warming"
@@ -110,7 +114,7 @@ jobs:
           export GRADLE_OPTS="-Xmx4g -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true"
           
           # Build both variants to cache everything
-          ./gradlew assembleRelease assembleDebug \
+          ./gradlew clean assembleRelease assembleDebug \
             --build-cache \
             --parallel \
             --no-daemon \
