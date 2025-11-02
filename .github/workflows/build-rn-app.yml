@@ -35,15 +35,56 @@ env:
   OUTPUT_TYPE: ${{ github.event.inputs.output_type || 'apk' }}
   NODE_VERSION: '18'
   JAVA_VERSION: '17'
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
 jobs:
   fast-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
 
     steps:
       - name: "📥 Checkout Repository"
         uses: actions/checkout@v4
+
+      - name: "📋 Read Build Configuration"
+        id: config
+        run: |
+          echo "Loading build configuration..."
+          if [ -f "build-config.json" ]; then
+            CONFIG=$(cat build-config.json)
+            WEBSITE_ADDRESS=$(echo $CONFIG | jq -r '.website_address // "https://example.com"')
+            VERSION_CODE=$(echo $CONFIG | jq -r '.version_code // "1"')
+            VERSION_NAME=$(echo $CONFIG | jq -r '.version_name // "1.0.0"')
+            NAME_SPACE=$(echo $CONFIG | jq -r '.name_space // "com.example.app"')
+            APP_ICON=$(echo $CONFIG | jq -r '.app_icon // "null"')
+            HAS_CUSTOM_ICON=$(echo $CONFIG | jq -r '.has_custom_icon // "false"')
+            
+            # Extract permissions with defaults
+            CAMERA_PERMISSION=$(echo $CONFIG | jq -r '.permissions.camera // "disabled"')
+            LOCATION_PERMISSION=$(echo $CONFIG | jq -r '.permissions.location // "disabled"')
+            MICROPHONE_PERMISSION=$(echo $CONFIG | jq -r '.permissions.microphone // "disabled"')
+            NOTIFICATIONS_PERMISSION=$(echo $CONFIG | jq -r '.permissions.notifications // "disabled"')
+            CONTACTS_PERMISSION=$(echo $CONFIG | jq -r '.permissions.contacts // "disabled"')
+            
+            # Set environment variables
+            {
+              echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS"
+              echo "VERSION_CODE=$VERSION_CODE"
+              echo "VERSION_NAME=$VERSION_NAME"
+              echo "NAME_SPACE=$NAME_SPACE"
+              echo "APP_ICON=$APP_ICON"
+              echo "HAS_CUSTOM_ICON=$HAS_CUSTOM_ICON"
+              echo "CAMERA_PERMISSION=$CAMERA_PERMISSION"
+              echo "LOCATION_PERMISSION=$LOCATION_PERMISSION"
+              echo "MICROPHONE_PERMISSION=$MICROPHONE_PERMISSION"
+              echo "NOTIFICATIONS_PERMISSION=$NOTIFICATIONS_PERMISSION"
+              echo "CONTACTS_PERMISSION=$CONTACTS_PERMISSION"
+            } >> $GITHUB_ENV
+          else
+            echo "Error: build-config.json not found!"
+            exit 1
+          fi
 
       - name: "⚙️ Setup Node.js with Cache"
         uses: actions/setup-node@v4
@@ -52,7 +93,20 @@ jobs:
           cache: 'npm'
           cache-dependency-path: '**/package-lock.json'
 
-      - name: "📦 Install Dependencies"
+      - name: "📦 Restore NPM Cache"
+        uses: actions/cache/restore@v4
+        id: npm-cache
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-npm-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-${{ env.NODE_VERSION }}-
+            ${{ runner.os }}-npm-
+
+      - name: "📦 Install Dependencies (if needed)"
+        if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps --no-audit --no-fund --prefer-offline
 
       - name: "☕ Setup Java with Gradle Cache"
@@ -62,104 +116,261 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: "🤖 Setup Android SDK"
-        uses: android-actions/setup-android@v3
-
       - name: "📦 Restore Android SDK Cache"
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
+        id: android-sdk-cache
         with:
           path: |
-            ${{ env.ANDROID_HOME }}/licenses
-            ${{ env.ANDROID_HOME }}/ndk
-            ${{ env.ANDROID_HOME }}/platforms
-            ${{ env.ANDROID_HOME }}/platform-tools
-            ${{ env.ANDROID_HOME }}/build-tools
-          key: android-sdk-${{ runner.os }}-${{ hashFiles('android/**/build.gradle*') }}
+            ${{ env.ANDROID_HOME }}
+            ~/.android
+          key: ${{ runner.os }}-android-sdk-${{ env.JAVA_VERSION }}-${{ hashFiles('android/build.gradle', 'android/app/build.gradle') }}
           restore-keys: |
-            android-sdk-${{ runner.os }}-
+            ${{ runner.os }}-android-sdk-${{ env.JAVA_VERSION }}-
+            ${{ runner.os }}-android-sdk-
 
-      - name: "📦 Restore Gradle Cache"
-        uses: actions/cache@v4
+      - name: "🤖 Setup Android SDK (if needed)"
+        if: steps.android-sdk-cache.outputs.cache-hit != 'true'
+        uses: android-actions/setup-android@v3
+        with:
+          android-sdk-directory: ${{ env.ANDROID_HOME }}
+
+      - name: "📦 Restore Gradle Wrapper Cache"
+        uses: actions/cache/restore@v4
+        id: gradle-wrapper-cache
+        with:
+          path: ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-wrapper-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: "📦 Restore Gradle Dependencies Cache"
+        uses: actions/cache/restore@v4
         id: gradle-cache
         with:
           path: |
-            ~/.gradle/wrapper
             ~/.gradle/caches
             ~/.gradle/daemon
             android/.gradle
-            android/app/build
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/**/build.gradle*') }}
+          key: ${{ runner.os }}-gradle-deps-${{ env.JAVA_VERSION }}-${{ hashFiles('android/build.gradle', 'android/app/build.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            gradle-${{ runner.os }}-
+            ${{ runner.os }}-gradle-deps-${{ env.JAVA_VERSION }}-
+            ${{ runner.os }}-gradle-deps-
 
-      - name: "📋 Read Build Configuration"
-        id: config
-        run: |
-          echo "Loading build configuration..."
-          CONFIG=$(cat build-config.json)
-          WEBSITE_ADDRESS=$(echo $CONFIG | jq -r '.website_address')
-          VERSION_CODE=$(echo $CONFIG | jq -r '.version_code')
-          VERSION_NAME=$(echo $CONFIG | jq -r '.version_name')
-          NAME_SPACE=$(echo $CONFIG | jq -r '.name_space')
-          
-          {
-            echo "WEBSITE_ADDRESS=$WEBSITE_ADDRESS"
-            echo "VERSION_CODE=$VERSION_CODE"
-            echo "VERSION_NAME=$VERSION_NAME"
-            echo "NAME_SPACE=$NAME_SPACE"
-          } >> $GITHUB_ENV
+      - name: "📦 Restore Android Build Cache"
+        uses: actions/cache/restore@v4
+        id: android-build-cache
+        with:
+          path: |
+            android/app/build/intermediates
+            android/app/build/tmp
+            android/app/.cxx
+            android/.gradle/buildOutputCleanup
+          key: ${{ runner.os }}-android-build-${{ hashFiles('android/build.gradle', 'android/app/build.gradle', 'android/app/src/**/*.kt', 'android/app/src/**/*.java') }}
+          restore-keys: |
+            ${{ runner.os }}-android-build-
 
-      - name: "🔧 Smart Template Customization"
+      - name: "📦 Restore Compiled Classes Cache"
+        uses: actions/cache/restore@v4
+        id: compiled-classes-cache
+        with:
+          path: |
+            android/app/build/tmp/kotlin-classes
+            android/app/build/intermediates/compile_app_classes_jar
+            android/app/build/intermediates/compile_library_classes_jar
+          key: ${{ runner.os }}-compiled-classes-${{ hashFiles('android/app/src/**/*.kt', 'android/app/src/**/*.java') }}
+          restore-keys: |
+            ${{ runner.os }}-compiled-classes-
+
+      - name: "📦 Restore Dex Cache"
+        uses: actions/cache/restore@v4
+        id: dex-cache
+        with:
+          path: |
+            android/app/build/intermediates/dex
+            android/app/build/intermediates/external_libs_dex
+          key: ${{ runner.os }}-dex-${{ hashFiles('android/app/build.gradle', '**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-dex-
+
+      - name: "📝 Update Android Manifest with Permissions"
         run: |
-          echo "Applying optimized template customizations..."
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
           
-          # Use faster single-pass replacement
-          {
-            # Critical: Only replace in files that don't affect Gradle cache keys
-            sed -i "s|{{website_address}}|$WEBSITE_ADDRESS|g" App.tsx
-            sed -i "s/{{app_name}}/$APP_NAME/g" app.json
-            sed -i "s/rn_project_template/$(echo $APP_NAME | sed 's/[^a-zA-Z0-9]//g')/g" app.json
+          # Create a temporary permissions file
+          cat > /tmp/permissions.xml << 'PERMS_EOF'
+          PERMS_EOF
+          
+          # Add permissions based on settings
+          if [ "${{ env.CAMERA_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.CAMERA" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />' >> /tmp/permissions.xml
+            echo '    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.MICROPHONE_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.RECORD_AUDIO" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.NOTIFICATIONS_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.READ_CONTACTS" />' >> /tmp/permissions.xml
+            echo '    <uses-permission android:name="android.permission.WRITE_CONTACTS" />' >> /tmp/permissions.xml
+          fi
+          
+          # Always add Internet and Network State
+          echo '    <uses-permission android:name="android.permission.INTERNET" />' >> /tmp/permissions.xml
+          echo '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' >> /tmp/permissions.xml
+          
+          # Use awk to replace the placeholder with file contents
+          awk '
+            /{{PERMISSIONS_PLACEHOLDER}}/ {
+              system("cat /tmp/permissions.xml")
+              next
+            }
+            {print}
+          ' "$MANIFEST_PATH" > /tmp/manifest_updated.xml
+          
+          mv /tmp/manifest_updated.xml "$MANIFEST_PATH"
+          
+          echo "✓ Permissions added to AndroidManifest.xml"
+
+      - name: "🔧 Apply Template Customizations"
+        run: |
+          echo "Applying template customizations..."
+          
+          NAME_SPACE_PARTS=(${NAME_SPACE//./ })
+          if [ ${#NAME_SPACE_PARTS[@]} -ge 3 ]; then
+            MIDDLE_SEGMENT=${NAME_SPACE_PARTS[1]}
+          else
+            MIDDLE_SEGMENT=${NAME_SPACE_PARTS[-1]}
+          fi
+          
+          # Use faster sed replacements
+          find android -type f \( -name "*.gradle" -o -name "*.kt" -o -name "*.xml" \) -exec sed -i "s/rn_project_template/$MIDDLE_SEGMENT/g" {} +
+          sed -i "s/rn_project_template/$MIDDLE_SEGMENT/g" app.json
+          sed -i "s/{{name_space}}/$NAME_SPACE/g" android/app/src/main/java/com/rn_project_template/MainActivity.kt
+          sed -i "s|{{website_address}}|$WEBSITE_ADDRESS|g" App.tsx
+          sed -i "s/{{app_name}}/$APP_NAME/g" app.json
+          sed -i "s/{{version_code}}/$VERSION_CODE/g" android/app/build.gradle
+          sed -i "s/{{version_name}}/$VERSION_NAME/g" android/app/build.gradle
+          sed -i "s/com.rn_project_template/$NAME_SPACE/g" android/app/build.gradle
+          sed -i "s/com.rn_project_template/$NAME_SPACE/g" android/app/src/main/java/com/rn_project_template/MainActivity.kt
+          sed -i "s/com.rn_project_template/$NAME_SPACE/g" android/app/src/main/java/com/rn_project_template/MainApplication.kt
+          sed -i "s/{{name_space}}/$NAME_SPACE/g" android/app/src/main/AndroidManifest.xml
+          sed -i "s/rn_project_template/$APP_NAME/g" android/app/src/main/res/values/strings.xml
+
+      - name: "🌐 Enable Cleartext Traffic"
+        run: |
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST_PATH" ] && ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
+            sed -i 's/<application/<application\n        android:usesCleartextTraffic="true"/g' "$MANIFEST_PATH"
+            echo "✓ Added usesCleartextTraffic attribute"
+          fi
+
+      - name: "🖼️ Process Custom App Icon"
+        if: env.HAS_CUSTOM_ICON == 'true'
+        run: |
+          node << 'EOF'
+          (async () => {
+            const sharp = require('sharp');
+            const fs = require('fs-extra');
+            const path = require('path');
             
-            # AndroidManifest.xml - permissions
-            sed -i 's/{{PERMISSIONS_PLACEHOLDER}}/<uses-permission android:name="android.permission.INTERNET" \/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" \/>/g' android/app/src/main/AndroidManifest.xml
+            const appIcon = process.env.APP_ICON;
+            if (!appIcon || appIcon === 'null') {
+              console.log('No app icon provided, skipping processing');
+              process.exit(0);
+            }
             
-            # Strings.xml - app name
-            sed -i "s/rn_project_template/$APP_NAME/g" android/app/src/main/res/values/strings.xml
-          }
-
-      - name: "📦 Dynamic Gradle Configuration"
-        run: |
-          echo "Applying dynamic configuration without breaking cache..."
-          
-          # Create a dynamic gradle properties file
-          cat > android/dynamic.gradle << 'GRADLE_SCRIPT'
-          ext {
-              dynamicVersionCode = ${{ env.VERSION_CODE }}
-              dynamicVersionName = "${{ env.VERSION_NAME }}"
-              dynamicApplicationId = "${{ env.NAME_SPACE }}"
-          }
-          
-          android {
-              defaultConfig {
-                  versionCode dynamicVersionCode
-                  versionName dynamicVersionName
-                  applicationId dynamicApplicationId
+            try {
+              let iconBuffer;
+              if (appIcon.startsWith('data:image/')) {
+                const base64Data = appIcon.replace(/^data:image\/\w+;base64,/, '');
+                iconBuffer = Buffer.from(base64Data, 'base64');
+              } else {
+                iconBuffer = await fs.readFile(appIcon);
               }
-          }
-          GRADLE_SCRIPT
+              
+              const androidResPath = 'android/app/src/main/res';
+              
+              const iconSizes = [
+                { size: 36, folder: 'drawable-ldpi' },
+                { size: 48, folder: 'drawable-mdpi' },
+                { size: 72, folder: 'drawable-hdpi' },
+                { size: 96, folder: 'drawable-xhdpi' },
+                { size: 144, folder: 'drawable-xxhdpi' },
+                { size: 192, folder: 'drawable-xxxhdpi' }
+              ];
+              
+              const iconPromises = [];
+              
+              for (const { size, folder } of iconSizes) {
+                const folderPath = path.join(androidResPath, folder);
+                await fs.ensureDir(folderPath);
+                iconPromises.push(
+                  sharp(iconBuffer).resize(size, size).png().toFile(path.join(folderPath, 'ic_launcher.png'))
+                );
+              }
+              
+              const roundIconSizes = [
+                { size: 48, folder: 'mipmap-mdpi' },
+                { size: 72, folder: 'mipmap-hdpi' },
+                { size: 96, folder: 'mipmap-xhdpi' },
+                { size: 144, folder: 'mipmap-xxhdpi' },
+                { size: 192, folder: 'mipmap-xxxhdpi' }
+              ];
+              
+              for (const { size, folder } of roundIconSizes) {
+                const folderPath = path.join(androidResPath, folder);
+                await fs.ensureDir(folderPath);
+                iconPromises.push(
+                  sharp(iconBuffer).resize(size, size).png().toFile(path.join(folderPath, 'ic_launcher.png'))
+                );
+                iconPromises.push(
+                  sharp(iconBuffer).resize(size, size).png().toFile(path.join(folderPath, 'ic_launcher_round.png'))
+                );
+              }
+              
+              await Promise.all(iconPromises);
+              console.log('All app icons generated successfully');
+            } catch (error) {
+              console.error('Error processing app icon:', error);
+              process.exit(1);
+            }
+          })();
+          EOF
+
+      - name: "📁 Restructure Java Package"
+        run: |
+          OLD_JAVA_PATH="android/app/src/main/java/com/rn_project_template"
+          NEW_JAVA_PATH="android/app/src/main/java/$(echo $NAME_SPACE | tr '.' '/')"
           
-          # Apply the dynamic configuration
-          echo "apply from: 'dynamic.gradle'" >> android/app/build.gradle
+          if [ -d "$OLD_JAVA_PATH" ]; then
+            mkdir -p "$NEW_JAVA_PATH"
+            cp -r "$OLD_JAVA_PATH"/* "$NEW_JAVA_PATH/"
+            rm -rf "$OLD_JAVA_PATH"
+            
+            # Clean up empty com directory if needed
+            COM_PATH="android/app/src/main/java/com"
+            if [ -d "$COM_PATH" ] && [ -z "$(ls -A $COM_PATH)" ]; then
+              rm -rf "$COM_PATH"
+            fi
+          fi
 
       - name: "🔧 Make Gradlew Executable"
         run: chmod +x android/gradlew
 
-      - name: "⚡ Fast Android Build"
+      - name: "⚡ Fast Android Build (Cached)"
         run: |
           cd android
-          echo "Starting fast incremental build..."
+          echo "Starting fast cached build..."
           
-          export GRADLE_OPTS="-Xmx3g -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.configureondemand=true"
+          export GRADLE_OPTS="-Xmx4g -XX:MaxMetaspaceSize=512m -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.configureondemand=true"
+          export _JAVA_OPTIONS="-Xmx3g"
           
           if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
             if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
@@ -168,16 +379,18 @@ jobs:
                 --parallel \
                 --max-workers=4 \
                 --no-daemon \
-                --configure-on-demand \
-                -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=256m"
+                -Dorg.gradle.jvmargs="-Xmx3g" \
+                -Pkotlin.incremental=true \
+                -Pkotlin.incremental.usePreciseJavaTracking=true
             else
               ./gradlew assembleRelease \
                 --build-cache \
                 --parallel \
                 --max-workers=4 \
                 --no-daemon \
-                --configure-on-demand \
-                -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=256m"
+                -Dorg.gradle.jvmargs="-Xmx3g" \
+                -Pkotlin.incremental=true \
+                -Pkotlin.incremental.usePreciseJavaTracking=true
             fi
           else
             ./gradlew assembleDebug \
@@ -185,32 +398,132 @@ jobs:
               --parallel \
               --max-workers=4 \
               --no-daemon \
-              --configure-on-demand \
-              -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=256m"
+              -Dorg.gradle.jvmargs="-Xmx3g" \
+              -Pkotlin.incremental=true \
+              -Pkotlin.incremental.usePreciseJavaTracking=true
           fi
 
       - name: "✅ Verify Build Output"
         run: |
           if [ "${{ env.OUTPUT_TYPE }}" == "aab" ]; then
-            OUTPUT_PATH="android/app/build/outputs/bundle/release/app-release.aab"
+            BUILT_APP_PATH="android/app/build/outputs/bundle/release/app-release.aab"
           else
-            OUTPUT_PATH="android/app/build/outputs/apk/release/app-release.apk"
+            if [ "${{ env.BUILD_TYPE }}" == "release" ]; then
+              BUILT_APP_PATH="android/app/build/outputs/apk/release/app-release.apk"
+            else
+              BUILT_APP_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+            fi
           fi
           
-          if [ -f "$OUTPUT_PATH" ]; then
-            echo "✅ Build successful!"
-            echo "Output: $OUTPUT_PATH"
-            ls -la "$OUTPUT_PATH"
+          if [ -f "$BUILT_APP_PATH" ]; then
+            mkdir -p artifacts
+            BUILD_ID="${{ env.BUILD_ID }}"
+            APP_NAME="${{ env.APP_NAME }}"
+            BUILD_TYPE="${{ env.BUILD_TYPE }}"
+            OUTPUT_TYPE="${{ env.OUTPUT_TYPE }}"
+            CLEAN_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
+            ARTIFACT_NAME="${CLEAN_APP_NAME}-${BUILD_TYPE}-${BUILD_ID}.${OUTPUT_TYPE}"
+            
+            cp "$BUILT_APP_PATH" "artifacts/$ARTIFACT_NAME"
+            FILE_SIZE=$(stat -c%s "artifacts/$ARTIFACT_NAME")
+            echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+            
+            echo "✅ Build successful! Output: $ARTIFACT_NAME ($(du -h artifacts/$ARTIFACT_NAME | cut -f1))"
           else
-            echo "❌ Build failed - output not found"
+            echo "❌ Build failed - output not found at: $BUILT_APP_PATH"
             exit 1
           fi
 
-      - name: "📊 Build Performance Report"
+      - name: "📊 Create Build Information"
+        run: |
+          BUILD_ID="${{ env.BUILD_ID }}"
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+          cat > artifacts/build-info.json << EOF
+          {
+            "buildId": "$BUILD_ID",
+            "appName": "${{ env.APP_NAME }}", 
+            "buildType": "${{ env.BUILD_TYPE }}",
+            "outputType": "${{ env.OUTPUT_TYPE }}",
+            "platform": "android",
+            "timestamp": "$TIMESTAMP",
+            "versionCode": "${{ env.VERSION_CODE }}",
+            "versionName": "${{ env.VERSION_NAME }}",
+            "namespace": "${{ env.NAME_SPACE }}",
+            "websiteAddress": "${{ env.WEBSITE_ADDRESS }}",
+            "fileSize": ${{ env.FILE_SIZE }},
+            "fileName": "${{ env.ARTIFACT_NAME }}",
+            "hasCustomIcon": ${{ env.HAS_CUSTOM_ICON }},
+            "cacheStatus": {
+              "npm": "${{ steps.npm-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "gradle": "${{ steps.gradle-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "androidSdk": "${{ steps.android-sdk-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "androidBuild": "${{ steps.android-build-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "compiledClasses": "${{ steps.compiled-classes-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}",
+              "dex": "${{ steps.dex-cache.outputs.cache-hit == 'true' && 'HIT' || 'MISS' }}"
+            }
+          }
+          EOF
+
+      - name: "🔐 Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: "☁️ Upload to S3"
+        run: |
+          BUILD_ID="${{ env.BUILD_ID }}"
+          S3_BUCKET="${{ secrets.AWS_S3_BUCKET }}"
+          S3_PREFIX="builds/${BUILD_ID}"
+          ARTIFACT_NAME="${{ env.ARTIFACT_NAME }}"
+          
+          if [ -z "$S3_BUCKET" ]; then
+            echo "❌ Error: AWS_S3_BUCKET secret not configured"
+            exit 1
+          fi
+          
+          echo "Uploading to S3 bucket: $S3_BUCKET"
+          aws s3 cp "artifacts/$ARTIFACT_NAME" "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
+          aws s3 cp artifacts/build-info.json "s3://${S3_BUCKET}/${S3_PREFIX}/" --no-progress
+          
+          echo "✅ Upload complete!"
+
+      - name: "📈 Build Summary"
         if: always()
         run: |
-          echo "## ⚡ Build Performance Report" >> $GITHUB_STEP_SUMMARY
+          echo "## ⚡ Fast Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Cache Status**: ${{ steps.gradle-cache.outputs.cache-hit == 'true' && '✅ HIT' || '⚠️ MISS' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Time**: ~1-2 minutes (optimized)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Strategy**: Incremental build with preserved cache" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Details:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build ID**: ${{ env.BUILD_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Name**: ${{ env.APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Type**: ${{ env.BUILD_TYPE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Output Type**: ${{ env.OUTPUT_TYPE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status == 'success' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Time**: ~1-2 minutes (cached)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "### 📦 Build Output:" >> $GITHUB_STEP_SUMMARY
+            echo "- **File**: ${{ env.ARTIFACT_NAME }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Size**: $(du -h artifacts/${{ env.ARTIFACT_NAME }} | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Cache Performance:" >> $GITHUB_STEP_SUMMARY
+          echo "- NPM Dependencies: ${{ steps.npm-cache.outputs.cache-hit == 'true' && '✅ HIT' || '⚠️ MISS' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Gradle Dependencies: ${{ steps.gradle-cache.outputs.cache-hit == 'true' && '✅ HIT' || '⚠️ MISS' }}" >> $GITHUB_STEP_SUMMARY  
+          echo "- Android SDK: ${{ steps.android-sdk-cache.outputs.cache-hit == 'true' && '✅ HIT' || '⚠️ MISS' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Android Build: ${{ steps.android-build-cache.outputs.cache-hit == 'true' && '✅ HIT' || '⚠️ MISS' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Compiled Classes: ${{ steps.compiled-classes-cache.outputs.cache-hit == 'true' && '✅ HIT' || '⚠️ MISS' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Dex Files: ${{ steps.dex-cache.outputs.cache-hit == 'true' && '✅ HIT' || '⚠️ MISS' }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: "📤 Upload Build Artifacts"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-${{ env.BUILD_ID }}
+          path: artifacts/
+          retention-days: 1
