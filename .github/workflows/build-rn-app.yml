@@ -55,6 +55,58 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: "📝 Update Android Manifest with Permissions"
+        run: |
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          
+          # Create a temporary permissions file
+          cat > /tmp/permissions.xml << 'PERMS_EOF'
+          PERMS_EOF
+          
+          # Add permissions based on settings
+          if [ "${{ env.CAMERA_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.CAMERA" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />' >> /tmp/permissions.xml
+            echo '    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.MICROPHONE_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.RECORD_AUDIO" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.NOTIFICATIONS_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' >> /tmp/permissions.xml
+          fi
+          
+          if [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ]; then
+            echo '    <uses-permission android:name="android.permission.READ_CONTACTS" />' >> /tmp/permissions.xml
+            echo '    <uses-permission android:name="android.permission.WRITE_CONTACTS" />' >> /tmp/permissions.xml
+          fi
+          
+          # Always add Internet and Network State
+          echo '    <uses-permission android:name="android.permission.INTERNET" />' >> /tmp/permissions.xml
+          echo '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' >> /tmp/permissions.xml
+          
+          # Use awk to replace the placeholder with file contents
+          awk '
+            /{{PERMISSIONS_PLACEHOLDER}}/ {
+              system("cat /tmp/permissions.xml")
+              next
+            }
+            {print}
+          ' "$MANIFEST_PATH" > /tmp/manifest_updated.xml
+          
+          mv /tmp/manifest_updated.xml "$MANIFEST_PATH"
+          
+          echo "✓ Permissions added to AndroidManifest.xml"
+          
+          # Show what was added (for debugging)
+          echo "Added permissions:"
+          cat /tmp/permissions.xml
+
       - name: "📋 Read Build Configuration"
         id: config
         run: |
@@ -243,20 +295,7 @@ jobs:
           };
           EOF
 
-      - name: "📝 Update Android Manifest with Permissions"
-        run: |
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          PERMISSIONS=""
-          
-          [ "${{ env.CAMERA_PERMISSION }}" == "enabled" ] && PERMISSIONS="${PERMISSIONS}    <uses-permission android:name=\"android.permission.CAMERA\" />\n"
-          [ "${{ env.LOCATION_PERMISSION }}" == "enabled" ] && PERMISSIONS="${PERMISSIONS}    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />\n    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />\n"
-          [ "${{ env.MICROPHONE_PERMISSION }}" == "enabled" ] && PERMISSIONS="${PERMISSIONS}    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />\n"
-          [ "${{ env.NOTIFICATIONS_PERMISSION }}" == "enabled" ] && PERMISSIONS="${PERMISSIONS}    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />\n"
-          [ "${{ env.CONTACTS_PERMISSION }}" == "enabled" ] && PERMISSIONS="${PERMISSIONS}    <uses-permission android:name=\"android.permission.READ_CONTACTS\" />\n    <uses-permission android:name=\"android.permission.WRITE_CONTACTS\" />\n"
-          
-          PERMISSIONS="${PERMISSIONS}    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />"
-          
-          sed -i "s/{{PERMISSIONS_PLACEHOLDER}}/$PERMISSIONS/g" "$MANIFEST_PATH"
+      
 
       - name: "🖼️ Process Custom App Icon"
         if: env.HAS_CUSTOM_ICON == 'true'
