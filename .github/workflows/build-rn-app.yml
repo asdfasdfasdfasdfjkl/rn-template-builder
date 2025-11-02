@@ -27,6 +27,11 @@ on:
         options:
           - apk
           - aab
+      platform:  
+        description: 'Platform'
+        required: false
+        default: 'android'
+        type: string
 
 env:
   BUILD_ID: ${{ github.event.inputs.build_id }}
