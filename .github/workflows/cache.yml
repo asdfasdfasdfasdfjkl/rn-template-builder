@@ -73,7 +73,24 @@ jobs:
       - name: "🔧 Make Gradlew Executable"
         run: chmod +x android/gradlew
 
-      # Fixed: Correct Gradle dependency download
+      # Fix AndroidManifest.xml before building
+      - name: "🔧 Fix AndroidManifest.xml for Cache"
+        run: |
+          echo "Fixing AndroidManifest.xml for cache building..."
+          
+          # Remove the package attribute from AndroidManifest.xml as it's no longer supported
+          sed -i 's/package="{{name_space}}"//g' android/app/src/main/AndroidManifest.xml
+          
+          # Also remove any other problematic package attributes
+          sed -i 's/package="[^"]*"//g' android/app/src/main/AndroidManifest.xml
+          
+          # Ensure namespace is set in build.gradle instead
+          if ! grep -q "namespace" android/app/build.gradle; then
+            # Add namespace to android block in defaultConfig
+            sed -i '/defaultConfig {/a\        namespace "com.rn_project_template"' android/app/build.gradle
+          fi
+
+      # Pre-download dependencies with template placeholders intact
       - name: "⬇️ Pre-download Gradle Dependencies"
         run: |
           cd android
