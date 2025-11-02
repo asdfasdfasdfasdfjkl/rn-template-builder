@@ -1,4 +1,4 @@
-name: Setup Build Cache
+name: Enhanced Build Cache Setup
 
 on:
   workflow_dispatch:
@@ -16,12 +16,12 @@ env:
   NODE_VERSION: '18'
   JAVA_VERSION: '17'
   ANDROID_HOME: /opt/android-sdk-linux
-  ANDROID_SDK_ROOT: /opt/android-sdk-linux
+  ANDROID_SDK_ROOT: /opt.android-sdk-linux
 
 jobs:
   setup-cache:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
 
     steps:
       - name: "📥 Checkout Repository"
@@ -29,37 +29,24 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Node.js Setup and NPM Cache
-      - name: "⚙️ Setup Node.js ${{ env.NODE_VERSION }}"
+      # Node.js Setup with improved caching
+      - name: "⚙️ Setup Node.js"
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: "📦 Restore NPM Dependencies Cache"
-        uses: actions/cache@v4
-        id: npm-cache
-        with:
-          path: |
-            ~/.npm
-            node_modules
-          key: ${{ runner.os }}-npm-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-${{ env.NODE_VERSION }}-
-            ${{ runner.os }}-npm-
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
 
       - name: "📦 Install NPM Dependencies"
-        if: steps.npm-cache.outputs.cache-hit != 'true' || github.event.inputs.force_refresh == 'true'
-        run: |
-          echo "Installing npm dependencies..."
-          npm ci --legacy-peer-deps --no-audit --no-fund
+        run: npm ci --legacy-peer-deps --no-audit --no-fund --prefer-offline
 
-      # Java JDK Setup
-      - name: "☕ Setup Java JDK ${{ env.JAVA_VERSION }}"
+      # Java Setup
+      - name: "☕ Setup Java JDK"
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
+          cache: 'gradle'
 
       # Android SDK Setup
       - name: "🤖 Setup Android SDK"
@@ -70,292 +57,94 @@ jobs:
         id: android-sdk-cache
         with:
           path: |
-            ${{ env.ANDROID_HOME }}
-            ~/.android
-          key: ${{ runner.os }}-android-sdk-${{ env.JAVA_VERSION }}-${{ hashFiles('android/build.gradle', 'android/app/build.gradle') }}
+            ${{ env.ANDROID_HOME }}/licenses
+            ${{ env.ANDROID_HOME }}/ndk
+            ${{ env.ANDROID_HOME }}/platforms
+            ${{ env.ANDROID_HOME }}/platform-tools
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: android-sdk-${{ runner.os }}-${{ hashFiles('android/**/build.gradle*') }}
           restore-keys: |
-            ${{ runner.os }}-android-sdk-${{ env.JAVA_VERSION }}-
-            ${{ runner.os }}-android-sdk-
+            android-sdk-${{ runner.os }}-
 
-      # Gradle Wrapper Cache
-      - name: "📦 Cache Gradle Wrapper"
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-wrapper-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-wrapper-
-
-      # Gradle Dependencies Cache
-      - name: "📦 Cache Gradle Dependencies"
-        uses: actions/cache@v4
-        id: gradle-cache
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/daemon
-            android/.gradle
-          key: ${{ runner.os }}-gradle-deps-${{ env.JAVA_VERSION }}-${{ hashFiles('android/build.gradle', 'android/app/build.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-deps-${{ env.JAVA_VERSION }}-
-            ${{ runner.os }}-gradle-deps-
-
+      # Make gradlew executable
       - name: "🔧 Make Gradlew Executable"
         run: chmod +x android/gradlew
 
-      # Download Gradle Dependencies
-      - name: "⬇️ Download Gradle Dependencies"
-        if: steps.gradle-cache.outputs.cache-hit != 'true' || github.event.inputs.force_refresh == 'true'
+      # Pre-download dependencies with template placeholders intact
+      - name: "⬇️ Pre-download Gradle Dependencies"
         run: |
           cd android
-          echo "Downloading Gradle dependencies..."
-          ./gradlew dependencies --no-daemon --stacktrace --parallel
+          # Download dependencies without building
+          ./gradlew dependencies --configuration implementation --no-daemon
+          ./gradlew dependencies --configuration releaseImplementation --no-daemon
+          ./gradlew dependencies --configuration debugImplementation --no-daemon
 
-      # Metro Cache
-      - name: "📦 Cache Metro Bundler"
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules/.cache/metro
-            ${{ runner.temp }}/metro-cache
-          key: ${{ runner.os }}-metro-${{ hashFiles('metro.config.js', 'package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-metro-
-
-      # React Native Cache
-      - name: "📦 Cache React Native Components"
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules/@react-native-community
-            node_modules/react-native
-          key: ${{ runner.os }}-rn-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-rn-
-
-      # Native Dependencies Cache
-      - name: "📦 Cache Native Dependencies"
-        uses: actions/cache@v4
-        id: native-deps-cache
-        with:
-          path: |
-            node_modules/sharp
-            node_modules/@img
-          key: ${{ runner.os }}-native-deps-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-native-deps-
-
-      - name: "🖼️ Install Sharp for Icon Processing"
-        if: steps.native-deps-cache.outputs.cache-hit != 'true' || github.event.inputs.force_refresh == 'true'
+      # Create universal pre-build that works with any namespace
+      - name: "🏗️ Universal Pre-build for Cache Warming"
         run: |
-          echo "Installing Sharp for icon processing..."
-          npm install sharp --no-save
-
-      # Kotlin Compiler Cache
-      - name: "📦 Cache Kotlin Compiler"
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.konan
-            ~/.kotlin
-          key: ${{ runner.os }}-kotlin-${{ hashFiles('android/build.gradle', 'android/app/build.gradle') }}
-          restore-keys: |
-            ${{ runner.os }}-kotlin-
-
-      # Pre-build Android App with Dummy Data
-      - name: "🏗️ Pre-build Android App (Warm Build Cache)"
-        id: prebuild
-        run: |
-          echo "Creating dummy build configuration for cache warming..."
+          echo "Creating universal pre-build configuration..."
           
-          # Create dummy build-config.json
+          # Create a build config that matches template structure
           cat > build-config.json << 'EOF'
           {
             "website_address": "https://example.com",
-            "app_name": "CacheWarmer",
+            "app_name": "TemplateApp",
             "version_code": "1",
             "version_name": "1.0.0",
-            "name_space": "com.cachewarmer.app",
+            "name_space": "com.rn_project_template",
             "has_custom_icon": false,
             "build_type": "release",
             "output_type": "apk",
             "platform": "android",
             "permissions": {},
-            "created_at": "2025-01-01T00:00:00Z"
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
-          
-          echo "Applying minimal template customizations..."
-          
-          # CRITICAL: Replace ALL occurrences in source files BEFORE Gradle runs
-          find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.json" -o -name "*.tsx" -o -name "*.ts" -o -name "*.js" \) \
-            -not -path "*/node_modules/*" \
-            -not -path "*/.git/*" \
-            -not -path "*/build/*" \
-            -not -path "*/.gradle/*" \
-            2>/dev/null | while read -r file; do
-              if [ -f "$file" ]; then
-                sed -i 's/{{name_space}}/com.cachewarmer.app/g' "$file" 2>/dev/null || true
-              fi
-            done
-          
-          # Apply other replacements
-          sed -i 's/rn_project_template/cachewarmer/g' android/settings.gradle
-          sed -i 's/rn_project_template/cachewarmer/g' app.json
-          sed -i 's|{{website_address}}|https://example.com|g' App.tsx
-          sed -i 's/{{app_name}}/CacheWarmer/g' app.json
-          sed -i 's/{{version_code}}/1/g' android/app/build.gradle
-          sed -i 's/rn_project_template/CacheWarmer/g' android/app/src/main/res/values/strings.xml
-          sed -i 's/{{version_name}}/1.0.0/g' android/app/build.gradle
-          sed -i 's/com.rn_project_template/com.cachewarmer.app/g' android/app/build.gradle
-          
-          # Replace in Kotlin/Java files
-          find android/app/src/main/java -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i 's/com.rn_project_template/com.cachewarmer.app/g' {} +
-          
-          # Add basic permissions (replace placeholder)
-          sed -i 's/{{PERMISSIONS_PLACEHOLDER}}/<uses-permission android:name="android.permission.INTERNET" \/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" \/>/g' android/app/src/main/AndroidManifest.xml
-          
-          # Enable cleartext traffic ONLY if not already present
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q "android:usesCleartextTraffic" "$MANIFEST_PATH"; then
-            sed -i 's/<application/<application\n        android:usesCleartextTraffic="true"/g' "$MANIFEST_PATH"
-          fi
-          
-          # Restructure Java package - MOVE not COPY
-          mkdir -p android/app/src/main/java/com/cachewarmer/app
-          if [ -d "android/app/src/main/java/com/rn_project_template" ]; then
-            mv android/app/src/main/java/com/rn_project_template/* android/app/src/main/java/com/cachewarmer/app/ 2>/dev/null || true
-            rm -rf android/app/src/main/java/com/rn_project_template
-            # Clean up empty directories
-            find android/app/src/main/java -type d -empty -delete 2>/dev/null || true
-          fi
-          
-          # Create a Gradle task wrapper that fixes auto-generated files
-          cat > android/fix-autogen.gradle << 'GRADLESCRIPT'
-          tasks.whenTaskAdded { task ->
-              if (task.name.contains("compileRelease") || task.name.contains("compileDebug")) {
-                  task.doFirst {
-                      def autolinkDir = file("${buildDir}/generated/autolinking/src/main/java/com/facebook/react")
-                      if (autolinkDir.exists()) {
-                          autolinkDir.eachFileRecurse { file ->
-                              if (file.name.endsWith('.java')) {
-                                  def content = file.text
-                                  if (content.contains('{{name_space}}')) {
-                                      content = content.replace('{{name_space}}', 'com.cachewarmer.app')
-                                      file.write(content)
-                                      println "Fixed placeholder in: ${file.name}"
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-          GRADLESCRIPT
-          
-          # Add the fix script to build.gradle
-          echo "" >> android/app/build.gradle
-          echo "apply from: '../fix-autogen.gradle'" >> android/app/build.gradle
-          
+
           cd android
           
-          echo "Building Android app to warm caches..."
-          export GRADLE_OPTS="-Xmx4g -XX:MaxMetaspaceSize=512m -Dorg.gradle.daemon=true -Dorg.gradle.parallel=true -Dorg.gradle.configureondemand=true"
-          export _JAVA_OPTIONS="-Xmx3g"
+          echo "Building Android app with template structure..."
+          export GRADLE_OPTS="-Xmx4g -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true"
           
-          # Build both debug and release to cache both
-          ./gradlew assembleRelease assembleDebug --build-cache --parallel --no-daemon --stacktrace
-          
-          echo "✓ Pre-build complete - build caches warmed!"
+          # Build both variants to cache everything
+          ./gradlew assembleRelease assembleDebug \
+            --build-cache \
+            --parallel \
+            --no-daemon \
+            --configure-on-demand \
+            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=512m"
 
-      # Cache Android Build Outputs
-      - name: "📦 Cache Android Build Outputs"
+      # Enhanced Gradle caching
+      - name: "📦 Cache Gradle Wrapper and Dependencies"
         uses: actions/cache@v4
         with:
           path: |
+            ~/.gradle/wrapper
+            ~/.gradle/caches
+            ~/.gradle/daemon
+            android/.gradle
+            android/app/build
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/**/build.gradle*') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # Cache build outputs
+      - name: "📦 Cache Build Outputs"
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/app/build/outputs
             android/app/build/intermediates
             android/app/build/tmp
             android/app/.cxx
-            android/.gradle/buildOutputCleanup
-          key: ${{ runner.os }}-android-build-${{ hashFiles('android/build.gradle', 'android/app/build.gradle', 'android/app/src/**/*.kt', 'android/app/src/**/*.java') }}
+          key: build-outputs-${{ runner.os }}-${{ hashFiles('android/app/src/**/*.kt', 'android/app/src/**/*.java') }}
           restore-keys: |
-            ${{ runner.os }}-android-build-
+            build-outputs-${{ runner.os }}-
 
-      # Cache Compiled Kotlin/Java Classes
-      - name: "📦 Cache Compiled Classes"
-        uses: actions/cache@v4
-        with:
-          path: |
-            android/app/build/tmp/kotlin-classes
-            android/app/build/intermediates/compile_app_classes_jar
-            android/app/build/intermediates/compile_library_classes_jar
-          key: ${{ runner.os }}-compiled-classes-${{ hashFiles('android/app/src/**/*.kt', 'android/app/src/**/*.java') }}
-          restore-keys: |
-            ${{ runner.os }}-compiled-classes-
-
-      # Cache Dex Files
-      - name: "📦 Cache Dex Files"
-        uses: actions/cache@v4
-        with:
-          path: |
-            android/app/build/intermediates/dex
-            android/app/build/intermediates/external_libs_dex
-          key: ${{ runner.os }}-dex-${{ hashFiles('android/app/build.gradle', '**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-dex-
-
-      # Verification and Summary
-      - name: "✅ Verify Cache Setup and Generate Summary"
+      - name: "✅ Cache Setup Complete"
         run: |
-          echo "## Build Cache Setup Complete 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Enhanced Cache Setup Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Cache Status:" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ steps.npm-cache.outputs.cache-hit }}" == "true" ]; then
-            echo "- ✅ NPM dependencies: CACHE HIT" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- 🔄 NPM dependencies: CACHE MISS (newly cached)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ "${{ steps.gradle-cache.outputs.cache-hit }}" == "true" ]; then
-            echo "- ✅ Gradle dependencies: CACHE HIT" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- 🔄 Gradle dependencies: CACHE MISS (newly cached)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ "${{ steps.android-sdk-cache.outputs.cache-hit }}" == "true" ]; then
-            echo "- ✅ Android SDK: CACHE HIT" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- 🔄 Android SDK: CACHE MISS (newly cached)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ "${{ steps.native-deps-cache.outputs.cache-hit }}" == "true" ]; then
-            echo "- ✅ Native dependencies: CACHE HIT" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- 🔄 Native dependencies: CACHE MISS (newly cached)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "- ✅ Android build outputs: NEWLY CACHED" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Compiled classes: NEWLY CACHED" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Dex files: NEWLY CACHED" >> $GITHUB_STEP_SUMMARY
-          
+          echo "**All build caches have been warmed and optimized for fast builds.**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**🚀 Cache setup complete! Build workflows should now be faster.**" >> $GITHUB_STEP_SUMMARY
-
-      # Store Cache Metadata
-      - name: "📊 Store Cache Metadata"
-        run: |
-          mkdir -p .github-cache
-          cat > .github-cache/cache-info.json << EOF
-          {
-            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "workflow_run": "${{ github.run_id }}",
-            "node_version": "${{ env.NODE_VERSION }}",
-            "java_version": "${{ env.JAVA_VERSION }}",
-            "force_refresh": "${{ github.event.inputs.force_refresh }}",
-            "prebuild_completed": true
-          }
-          EOF
-          
-          echo "✅ Cache setup completed successfully"
+          echo "Next builds should complete in 1-2 minutes with proper cache hits." >> $GITHUB_STEP_SUMMARY
