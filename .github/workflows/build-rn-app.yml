@@ -276,6 +276,10 @@ jobs:
             echo "✓ Added usesCleartextTraffic attribute"
           fi
 
+      - name: "🖼️ Install Sharp for Icon Processing"
+        if: env.HAS_CUSTOM_ICON == 'true'
+        run: npm install sharp --no-save --no-audit --no-fund
+
       - name: "🖼️ Process Custom App Icon"
         if: env.HAS_CUSTOM_ICON == 'true'
         run: |
